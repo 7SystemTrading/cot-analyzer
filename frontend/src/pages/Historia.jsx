@@ -2,9 +2,16 @@ import { useEffect, useState } from 'react'
 import { getCurrencyHistory, getPairHistory } from '../api/client'
 import TrendChart from '../components/TrendChart'
 
-const CURRENCIES = ['EUR', 'GBP', 'JPY', 'CAD', 'CHF', 'AUD', 'NZD', 'USD']
-const PAIRS = ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCAD', 'USDCHF', 'AUDUSD', 'NZDUSD',
-  'EURJPY', 'EURGBP', 'GBPJPY', 'AUDJPY', 'NZDJPY', 'CADJPY', 'EURCAD', 'EURCHF']
+// Forex-standardin mukainen hierarkia
+const CURRENCIES = ['EUR', 'GBP', 'AUD', 'NZD', 'USD', 'CAD', 'CHF', 'JPY']
+const PAIRS = [
+  'EURGBP', 'EURAUD', 'EURNZD', 'EURUSD', 'EURCAD', 'EURCHF', 'EURJPY',
+  'GBPAUD', 'GBPNZD', 'GBPUSD', 'GBPCAD', 'GBPCHF', 'GBPJPY',
+  'AUDNZD', 'AUDUSD', 'AUDCAD', 'AUDCHF', 'AUDJPY',
+  'NZDUSD', 'NZDCAD', 'NZDCHF', 'NZDJPY',
+  'USDCAD', 'USDCHF', 'USDJPY',
+  'CADCHF', 'CADJPY', 'CHFJPY',
+]
 
 export default function Historia() {
   const [mode, setMode] = useState('currency')

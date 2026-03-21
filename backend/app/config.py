@@ -22,16 +22,29 @@ CURRENCY_CONTRACTS: Dict[str, str] = {
 
 CURRENCIES: List[str] = list(CURRENCY_CONTRACTS.keys())
 
-# USD-major parit esitetään ensin, sitten crossit
+# Forex-standardin mukainen valuuttahierarkia:
+# EUR > GBP > AUD > NZD > USD > CAD > CHF > JPY
+# Korkeampi hierarkia on aina base-valuutta.
+CURRENCY_HIERARCHY: List[str] = ["EUR", "GBP", "AUD", "NZD", "USD", "CAD", "CHF", "JPY"]
+
+# 28 standardiparia hierarkiajärjestyksessä (base/quote)
 DISPLAY_PAIRS: List[Tuple[str, str]] = [
-    ("EUR", "USD"), ("GBP", "USD"), ("USD", "JPY"),
-    ("USD", "CAD"), ("USD", "CHF"), ("AUD", "USD"), ("NZD", "USD"),
-    ("EUR", "GBP"), ("EUR", "JPY"), ("EUR", "CAD"), ("EUR", "CHF"),
-    ("EUR", "AUD"), ("EUR", "NZD"),
-    ("GBP", "JPY"), ("GBP", "CAD"), ("GBP", "CHF"), ("GBP", "AUD"), ("GBP", "NZD"),
-    ("AUD", "JPY"), ("AUD", "CAD"), ("AUD", "CHF"), ("AUD", "NZD"),
-    ("NZD", "JPY"), ("NZD", "CAD"), ("NZD", "CHF"),
-    ("CAD", "JPY"), ("CAD", "CHF"),
+    # EUR-parit (7)
+    ("EUR", "GBP"), ("EUR", "AUD"), ("EUR", "NZD"),
+    ("EUR", "USD"), ("EUR", "CAD"), ("EUR", "CHF"), ("EUR", "JPY"),
+    # GBP-parit (6)
+    ("GBP", "AUD"), ("GBP", "NZD"), ("GBP", "USD"),
+    ("GBP", "CAD"), ("GBP", "CHF"), ("GBP", "JPY"),
+    # AUD-parit (5)
+    ("AUD", "NZD"), ("AUD", "USD"), ("AUD", "CAD"),
+    ("AUD", "CHF"), ("AUD", "JPY"),
+    # NZD-parit (4)
+    ("NZD", "USD"), ("NZD", "CAD"), ("NZD", "CHF"), ("NZD", "JPY"),
+    # USD-parit (3)
+    ("USD", "CAD"), ("USD", "CHF"), ("USD", "JPY"),
+    # CAD-parit (2)
+    ("CAD", "CHF"), ("CAD", "JPY"),
+    # CHF-pari (1)
     ("CHF", "JPY"),
 ]
 

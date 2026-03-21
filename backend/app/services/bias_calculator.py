@@ -15,7 +15,6 @@ Bias-luokittelu (THRESHOLD = 25):
   STRONG SHORT: index < −THRESHOLD  AND  Δ1_A < 0  AND  Δ1_B > 0
   NEUTRAL:      kaikki muu
 """
-import itertools
 import logging
 from datetime import date
 from typing import Optional
@@ -23,7 +22,7 @@ from typing import Optional
 from sqlalchemy import distinct, func
 from sqlalchemy.orm import Session
 
-from app.config import CURRENCIES
+from app.config import CURRENCIES, DISPLAY_PAIRS
 from app.models import RawReport
 
 logger = logging.getLogger(__name__)
@@ -145,8 +144,8 @@ def compute_bias_dashboard(
             "delta_4": deltas[3],
         })
 
-    # 28 uniikkia paria
-    pairs = list(itertools.combinations(CURRENCIES, 2))
+    # 28 standardiparia (forex-konventio: hierarkiajärjestys)
+    pairs = DISPLAY_PAIRS
     strong_long = []
     strong_short = []
     neutral_count = 0

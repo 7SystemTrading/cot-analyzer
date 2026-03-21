@@ -1,6 +1,7 @@
 import { heatmapColor, fmt2 } from '../utils/formatters'
 
-const CURRENCIES = ['EUR', 'GBP', 'JPY', 'CAD', 'CHF', 'AUD', 'NZD', 'USD']
+// Forex-standardin mukainen hierarkia
+const CURRENCIES = ['EUR', 'GBP', 'AUD', 'NZD', 'USD', 'CAD', 'CHF', 'JPY']
 
 export default function PairHeatmap({ data, minScore = 0 }) {
   if (!data || data.length === 0) {
