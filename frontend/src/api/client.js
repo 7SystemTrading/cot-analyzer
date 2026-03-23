@@ -70,6 +70,15 @@ export const getVerificationStats = (weeks = 26, horizon = 1) =>
 export const getComponentAnalysis = (weeks = 52, horizon = 1) =>
   api.get('/verification/component-analysis', { params: { weeks, horizon } })
 
+// Exhaustion Contrarian
+export const getExhaustionSignals = (reportDate = null, threshold = 1.5) =>
+  api.get('/exhaustion', {
+    params: {
+      ...(reportDate ? { report_date: reportDate } : {}),
+      threshold,
+    },
+  })
+
 // Config
 export const getConfig = () => api.get('/config')
 export const updateWeights = (weights) => api.put('/config/weights', weights)

@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.database import SessionLocal, init_db
 from app.models import RawReport
-from app.routers import bias_dashboard, config_router, currencies, dashboard, import_data, pairs, verification
+from app.routers import bias_dashboard, config_router, currencies, dashboard, exhaustion, import_data, pairs, verification
 from app.services.scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(
@@ -89,6 +89,7 @@ app.include_router(pairs.router)
 app.include_router(import_data.router)
 app.include_router(config_router.router)
 app.include_router(bias_dashboard.router)
+app.include_router(exhaustion.router)
 app.include_router(verification.router)
 
 # Staattisten tiedostojen palveleminen (React-build)

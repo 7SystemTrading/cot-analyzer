@@ -264,3 +264,25 @@ class ComponentAnalysisResponse(BaseModel):
     components: List[ComponentHitRates] = []
     best_trend: Optional[str] = None        # Paras trendinmukainen komponentti
     best_contrarian: Optional[str] = None   # Paras kontraarinen komponentti
+
+
+# ---------------------------------------------------------------------------
+# Exhaustion Contrarian -signaali
+# ---------------------------------------------------------------------------
+class ExhaustionSignalPair(BaseModel):
+    pair: str
+    pair_A: float                           # Parin A-komponentti (base_z - quote_z)
+    pair_A_prev: Optional[float] = None     # Edellisen viikon pair_A
+    a_growing: bool = False                 # |A| kasvaa → exhaustion rakentuu
+    signal: str                             # "CONTRARIAN_SHORT" | "CONTRARIAN_LONG" | "NEUTRAL"
+    signal_strength: str                    # "strong" | "moderate" | "none"
+    note: str = ""
+
+
+class ExhaustionDashboardResponse(BaseModel):
+    report_date: Optional[date] = None
+    publish_date: Optional[date] = None
+    threshold: float = 1.5                  # Yksittäisen valuutan |z| raja
+    contrarian_short: List[ExhaustionSignalPair] = []   # A äärimmäisen positiivinen → ennusta laskua
+    contrarian_long: List[ExhaustionSignalPair] = []    # A äärimmäisen negatiivinen → ennusta nousua
+    neutral_count: int = 0
