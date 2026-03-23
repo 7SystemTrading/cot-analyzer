@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getCurrencyRanking, getAvailableDates } from '../api/client'
 import CurrencyTable from '../components/CurrencyTable'
+import WeekSelector from '../components/WeekSelector'
 
 export default function Valuutat() {
   const [data, setData] = useState([])
@@ -30,20 +31,7 @@ export default function Valuutat() {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
         <h1 style={h1}>Valuuttaranking</h1>
-        {dates.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <label style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Positiot mitattu:</label>
-            <select
-              value={selectedDate || ''}
-              onChange={e => setSelectedDate(e.target.value || null)}
-              style={selectStyle}
-            >
-              {dates.map(d => (
-                <option key={d} value={d}>{d}</option>
-              ))}
-            </select>
-          </div>
-        )}
+        <WeekSelector dates={dates} selected={selectedDate} onChange={setSelectedDate} />
       </div>
 
       {loading ? (

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getPairRanking, getHeatmapData, getAvailableDates } from '../api/client'
 import PairHeatmap from '../components/PairHeatmap'
+import WeekSelector from '../components/WeekSelector'
 import BiasLabel from '../components/BiasLabel'
 import PercentileGauge from '../components/PercentileGauge'
 import { fmt2, scoreColor, scoreBg } from '../utils/formatters'
@@ -52,11 +53,7 @@ export default function Valuuttaparit() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
         <h1 style={h1}>Valuuttaparit</h1>
         <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
-          {dates.length > 0 && (
-            <select value={selectedDate || ''} onChange={e => setSelectedDate(e.target.value || null)} style={selectStyle}>
-              {dates.map(d => <option key={d} value={d}>{d}</option>)}
-            </select>
-          )}
+          <WeekSelector dates={dates} selected={selectedDate} onChange={setSelectedDate} />
           <select value={minScore} onChange={e => setMinScore(Number(e.target.value))} style={selectStyle}>
             <option value={0}>Kaikki parit</option>
             <option value={0.5}>|Score| ≥ 0.5</option>

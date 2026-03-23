@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getExhaustionSignals, getAvailableDates } from '../api/client'
 import { fmtDateWithDay, fmt2 } from '../utils/formatters'
+import WeekSelector from '../components/WeekSelector'
 
 export default function Exhaustion() {
   const [data, setData] = useState(null)
@@ -35,15 +36,7 @@ export default function Exhaustion() {
               <option value={2.0}>2.0 (tiukempi)</option>
             </select>
           </div>
-          {dates.length > 0 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <label style={labelSm}>Positiot mitattu:</label>
-              <select value={selectedDate || ''} onChange={e => setSelectedDate(e.target.value || null)} style={selectStyle}>
-                <option value="">Uusin</option>
-                {dates.map(d => <option key={d} value={d}>{d}</option>)}
-              </select>
-            </div>
-          )}
+          <WeekSelector dates={dates} selected={selectedDate} onChange={setSelectedDate} />
         </div>
       </div>
 

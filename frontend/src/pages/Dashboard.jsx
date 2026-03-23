@@ -3,6 +3,7 @@ import { getDashboard, getAvailableDates } from '../api/client'
 import DataStatusBanner from '../components/DataStatusBanner'
 import BiasLabel from '../components/BiasLabel'
 import { scoreColor, fmt2, fmtPct, fmtDate } from '../utils/formatters'
+import WeekSelector from '../components/WeekSelector'
 import { Link } from 'react-router-dom'
 
 export default function Dashboard() {
@@ -38,21 +39,7 @@ export default function Dashboard() {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
         <h1 style={h1}>Dashboard</h1>
-        {dates.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <label style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Positiot mitattu:</label>
-            <select
-              value={selectedDate || ''}
-              onChange={e => setSelectedDate(e.target.value || null)}
-              style={selectStyle}
-            >
-              <option value="">Uusin</option>
-              {dates.map(d => (
-                <option key={d} value={d}>{d}</option>
-              ))}
-            </select>
-          </div>
-        )}
+        <WeekSelector dates={dates} selected={selectedDate} onChange={setSelectedDate} />
       </div>
 
       <div style={{ marginBottom: '20px' }}>

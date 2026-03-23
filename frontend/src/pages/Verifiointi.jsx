@@ -3,6 +3,7 @@ import { getVerification, getVerificationStats, getAvailableDates, getComponentA
 import BiasLabel from '../components/BiasLabel'
 import MiniCandleChart from '../components/MiniCandleChart'
 import { fmt2, scoreColor, fmtDateWithDay } from '../utils/formatters'
+import WeekSelector from '../components/WeekSelector'
 
 export default function Verifiointi() {
   const [data, setData] = useState(null)
@@ -62,15 +63,7 @@ export default function Verifiointi() {
               ))}
             </div>
           </div>
-          {dates.length > 0 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <label style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Positiot mitattu:</label>
-              <select value={selectedDate || ''} onChange={e => setSelectedDate(e.target.value || null)} style={selectStyle}>
-                <option value="">Uusin</option>
-                {dates.map(d => <option key={d} value={d}>{d}</option>)}
-              </select>
-            </div>
-          )}
+          <WeekSelector dates={dates} selected={selectedDate} onChange={setSelectedDate} />
         </div>
       </div>
 
