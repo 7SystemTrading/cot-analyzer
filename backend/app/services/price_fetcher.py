@@ -119,6 +119,7 @@ def _fetch_usd_candles(db: Session, start: date, end: date) -> Dict[str, pd.Data
                 progress=False,
                 auto_adjust=True,
                 group_by="ticker" if len(tickers) > 1 else None,
+                timeout=30,
             )
 
             if df is not None and not df.empty:

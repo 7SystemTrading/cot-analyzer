@@ -160,12 +160,32 @@ def get_verification(
             verification_end=verify_end,
         )
 
-    # Hae kynttilät ja rakenna verifiointi jokaiselle parille
+    # Hae kynttilät vain ei-neutraaleille pareille (keventää hakua)
+    non_neutral_pairs = [pr for pr in pair_rows if _is_bullish(pr.bias_label or "") is not None]
+    neutral_pairs = [pr for pr in pair_rows if _is_bullish(pr.bias_label or "") is None]
+
+    # Hae hintadata kaikille ei-neutraaleille pareille kerralla (1 yfinance-kutsu)
+    if non_neutral_pairs and verify_end <= date.today():
+        from app.services.price_fetcher import fetch_all_pairs_candles
+        pair_names = [pr.pair for pr in non_neutral_pairs]
+        all_candles = fetch_all_pairs_candles(db, pair_names, verify_start, verify_end)
+    else:
+        all_candles = {}
+
+    # Rakenna verifiointi
     verifications = []
-    for pr in pair_rows:
-        candles = fetch_candles(db, pr.pair, verify_start, verify_end)
+    for pr in non_neutral_pairs:
+        candles = all_candles.get(pr.pair, [])
         v = _build_pair_verification(pr, candles)
         verifications.append(v)
+
+    # Neutraalit parit: ei hintadataa, vain bias-tiedot
+    for pr in neutral_pairs:
+        v = _build_pair_verification(pr, [])
+        verifications.append(v)
+
+    # Järjestä takaisin scoren mukaan
+    verifications.sort(key=lambda v: v.pair_score, reverse=True)
 
     # Kokonaisstatistiikka
     week_correct = [v.week_bias_correct for v in verifications if v.week_bias_correct is not None]
@@ -245,13 +265,20 @@ def get_verification_stats(
             .all()
         )
 
-        week_hits = []
-        for pr in pair_rows:
-            is_bull = _is_bullish(pr.bias_label or "")
-            if is_bull is None:
-                continue
+        # Hae vain ei-neutraalit parit + kerralla (1 yfinance-kutsu per viikko)
+        non_neutral = [(pr, _is_bullish(pr.bias_label or "")) for pr in pair_rows]
+        non_neutral = [(pr, bull) for pr, bull in non_neutral if bull is not None]
 
-            candles = fetch_candles(db, pr.pair, verify_start, verify_end)
+        if non_neutral:
+            from app.services.price_fetcher import fetch_all_pairs_candles
+            pair_names = [pr.pair for pr, _ in non_neutral]
+            all_candles = fetch_all_pairs_candles(db, pair_names, verify_start, verify_end)
+        else:
+            all_candles = {}
+
+        week_hits = []
+        for pr, is_bull in non_neutral:
+            candles = all_candles.get(pr.pair, [])
             if not candles:
                 continue
 
