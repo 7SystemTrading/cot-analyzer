@@ -93,6 +93,23 @@ class PairMetrics(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
+class PriceData(Base):
+    """Päivittäinen OHLC-hintadata (yfinance). Cache verifiointia varten."""
+    __tablename__ = "price_data"
+    __table_args__ = (
+        UniqueConstraint("pair", "date", name="uq_price_data"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    pair = Column(String(8), nullable=False, index=True)
+    date = Column(Date, nullable=False, index=True)
+    open = Column(Float, nullable=False)
+    high = Column(Float, nullable=False)
+    low = Column(Float, nullable=False)
+    close = Column(Float, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+
 class ImportLog(Base):
     """Import-operaatioiden lokitiedot."""
     __tablename__ = "import_log"

@@ -6,10 +6,12 @@ import Historia from './pages/Historia'
 import TuoData from './pages/TuoData'
 import Metodologia from './pages/Metodologia'
 import BiasDashboard from './pages/BiasDashboard'
+import Verifiointi from './pages/Verifiointi'
 
 const NAV = [
   { to: '/', label: 'Dashboard' },
   { to: '/bias', label: 'COT Bias' },
+  { to: '/verifiointi', label: 'Verifiointi' },
   { to: '/valuutat', label: 'Valuutat' },
   { to: '/parit', label: 'Valuuttaparit' },
   { to: '/historia', label: 'Historia' },
@@ -75,6 +77,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/bias" element={<BiasDashboard />} />
+          <Route path="/verifiointi" element={<Verifiointi />} />
           <Route path="/valuutat" element={<Valuutat />} />
           <Route path="/parit" element={<Valuuttaparit />} />
           <Route path="/historia" element={<Historia />} />

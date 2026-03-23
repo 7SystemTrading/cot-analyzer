@@ -187,3 +187,58 @@ class BiasDashboardResponse(BaseModel):
     strong_long: List[BiasPairRow] = []
     strong_short: List[BiasPairRow] = []
     neutral_count: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Verifiointi (hintadata vs. bias)
+# ---------------------------------------------------------------------------
+class CandleOut(BaseModel):
+    date: str
+    open: float
+    high: float
+    low: float
+    close: float
+
+
+class VerificationPairRow(BaseModel):
+    pair: str
+    bias_label: str
+    pair_score: float
+    candles: List[CandleOut] = []
+    daily_changes_pct: List[Optional[float]] = []
+    daily_bias_correct: List[Optional[bool]] = []
+    week_open: Optional[float] = None
+    week_close: Optional[float] = None
+    week_change_pct: Optional[float] = None
+    direction: Optional[str] = None      # "up" | "down" | None
+    week_bias_correct: Optional[bool] = None
+    daily_hit_rate: Optional[float] = None
+
+
+class VerificationResponse(BaseModel):
+    report_date: Optional[date] = None
+    publish_date: Optional[date] = None
+    verification_start: Optional[date] = None
+    verification_end: Optional[date] = None
+    pairs: List[VerificationPairRow] = []
+    hit_rate_week: Optional[float] = None
+    hit_rate_daily: Optional[float] = None
+    hit_rate_strong: Optional[float] = None
+    hit_rate_mild: Optional[float] = None
+    total_evaluated: int = 0
+    total_neutral: int = 0
+
+
+class VerificationWeekSummary(BaseModel):
+    report_date: date
+    hit_rate: Optional[float] = None
+    pairs_evaluated: int = 0
+
+
+class VerificationStatsResponse(BaseModel):
+    weeks_analyzed: int = 0
+    week_hit_rate: Optional[float] = None
+    daily_hit_rate: Optional[float] = None
+    strong_bias_hit_rate: Optional[float] = None
+    mild_bias_hit_rate: Optional[float] = None
+    by_week: List[VerificationWeekSummary] = []

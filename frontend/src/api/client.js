@@ -55,6 +55,13 @@ export const getBiasDashboard = (reportDate = null, threshold = 25) =>
     },
   })
 
+// Verifiointi
+export const getVerification = (reportDate = null) =>
+  api.get('/verification', { params: reportDate ? { report_date: reportDate } : {} })
+
+export const getVerificationStats = (weeks = 26) =>
+  api.get('/verification/stats', { params: { weeks } })
+
 // Config
 export const getConfig = () => api.get('/config')
 export const updateWeights = (weights) => api.put('/config/weights', weights)
