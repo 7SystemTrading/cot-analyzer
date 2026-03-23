@@ -56,11 +56,19 @@ export const getBiasDashboard = (reportDate = null, threshold = 25) =>
   })
 
 // Verifiointi
-export const getVerification = (reportDate = null) =>
-  api.get('/verification', { params: reportDate ? { report_date: reportDate } : {} })
+export const getVerification = (reportDate = null, horizon = 1) =>
+  api.get('/verification', {
+    params: {
+      ...(reportDate ? { report_date: reportDate } : {}),
+      horizon,
+    },
+  })
 
-export const getVerificationStats = (weeks = 26) =>
-  api.get('/verification/stats', { params: { weeks } })
+export const getVerificationStats = (weeks = 26, horizon = 1) =>
+  api.get('/verification/stats', { params: { weeks, horizon } })
+
+export const getComponentAnalysis = (weeks = 52, horizon = 1) =>
+  api.get('/verification/component-analysis', { params: { weeks, horizon } })
 
 // Config
 export const getConfig = () => api.get('/config')

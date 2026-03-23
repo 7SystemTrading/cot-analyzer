@@ -242,3 +242,25 @@ class VerificationStatsResponse(BaseModel):
     strong_bias_hit_rate: Optional[float] = None
     mild_bias_hit_rate: Optional[float] = None
     by_week: List[VerificationWeekSummary] = []
+
+
+# ---------------------------------------------------------------------------
+# Komponenttianalyysi
+# ---------------------------------------------------------------------------
+class ComponentHitRates(BaseModel):
+    component: str                          # "A", "B", "C", "D", "B+C", "Composite"
+    label: str                              # Ihmisluettava nimi
+    trend_hit_rate: Optional[float] = None  # Osuma trendinmukaisena
+    contrarian_hit_rate: Optional[float] = None  # Osuma kontraarina
+    extreme_trend_hr: Optional[float] = None     # |z|>1.5, trendinmukainen
+    extreme_contrarian_hr: Optional[float] = None  # |z|>1.5, kontraarinen
+    sample_count: int = 0                   # Kaikki havainnot (ei-neutraalit)
+    extreme_count: int = 0                  # Ääripäähavainnot (|z|>1.5)
+
+
+class ComponentAnalysisResponse(BaseModel):
+    horizon_weeks: int = 1
+    analysis_weeks: int = 52
+    components: List[ComponentHitRates] = []
+    best_trend: Optional[str] = None        # Paras trendinmukainen komponentti
+    best_contrarian: Optional[str] = None   # Paras kontraarinen komponentti

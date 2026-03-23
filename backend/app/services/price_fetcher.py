@@ -326,3 +326,15 @@ def get_verification_week(report_date: date) -> tuple[date, date]:
     verify_start = report_date + timedelta(days=6)
     verify_end = report_date + timedelta(days=10)
     return verify_start, verify_end
+
+
+def get_verification_period(report_date: date, horizon_weeks: int = 1) -> tuple[date, date]:
+    """
+    Laskee verifiointiperiodin alun ja lopun.
+    horizon_weeks=1: ma–pe (normaali verifiointiviikko)
+    horizon_weeks=2: ma–2.viikon pe
+    horizon_weeks=4: ma–4.viikon pe
+    """
+    verify_start = report_date + timedelta(days=6)  # seuraava maanantai
+    verify_end = verify_start + timedelta(days=horizon_weeks * 7 - 3)  # viimeinen perjantai
+    return verify_start, verify_end

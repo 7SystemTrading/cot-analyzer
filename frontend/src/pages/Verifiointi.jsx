@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getVerification, getVerificationStats, getAvailableDates } from '../api/client'
+import { getVerification, getVerificationStats, getAvailableDates, getComponentAnalysis } from '../api/client'
 import BiasLabel from '../components/BiasLabel'
 import MiniCandleChart from '../components/MiniCandleChart'
 import { fmt2, scoreColor, fmtDateWithDay } from '../utils/formatters'
@@ -7,11 +7,13 @@ import { fmt2, scoreColor, fmtDateWithDay } from '../utils/formatters'
 export default function Verifiointi() {
   const [data, setData] = useState(null)
   const [stats, setStats] = useState(null)
+  const [compAnalysis, setCompAnalysis] = useState(null)
   const [dates, setDates] = useState([])
   const [selectedDate, setSelectedDate] = useState(null)
+  const [horizon, setHorizon] = useState(1)
   const [expandedPair, setExpandedPair] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [statsLoading, setStatsLoading] = useState(false)
+  const [compLoading, setCompLoading] = useState(false)
   const [error, setError] = useState(null)
 
   useEffect(() => {
@@ -20,34 +22,56 @@ export default function Verifiointi() {
 
   useEffect(() => {
     setLoading(true); setError(null); setExpandedPair(null)
-    getVerification(selectedDate)
+    getVerification(selectedDate, horizon)
       .then(r => setData(r.data))
       .catch(e => setError(e.response?.data?.detail || e.message))
       .finally(() => setLoading(false))
-  }, [selectedDate])
+  }, [selectedDate, horizon])
 
-  // Kokonaisstatistiikka (lataa kerran)
+  // Pitkäaikainen statistiikka + komponenttianalyysi (lataa kun horisontti vaihtuu)
   useEffect(() => {
-    setStatsLoading(true)
-    getVerificationStats(52)
+    getVerificationStats(52, horizon)
       .then(r => setStats(r.data))
       .catch(() => {})
-      .finally(() => setStatsLoading(false))
-  }, [])
+  }, [horizon])
+
+  useEffect(() => {
+    setCompLoading(true)
+    getComponentAnalysis(52, horizon)
+      .then(r => setCompAnalysis(r.data))
+      .catch(() => {})
+      .finally(() => setCompLoading(false))
+  }, [horizon])
 
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
         <h1 style={h1}>Verifiointi</h1>
-        {dates.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <label style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Positiot mitattu:</label>
-            <select value={selectedDate || ''} onChange={e => setSelectedDate(e.target.value || null)} style={selectStyle}>
-              <option value="">Uusin</option>
-              {dates.map(d => <option key={d} value={d}>{d}</option>)}
-            </select>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <label style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Horisontti:</label>
+            <div style={{ display: 'flex', borderRadius: '6px', overflow: 'hidden', border: '1px solid #334155' }}>
+              {[1, 2, 4].map(h => (
+                <button key={h} onClick={() => setHorizon(h)}
+                  style={{ padding: '5px 12px', border: 'none', cursor: 'pointer',
+                    background: horizon === h ? '#3b82f6' : '#1e293b',
+                    color: horizon === h ? '#fff' : '#94a3b8',
+                    fontWeight: horizon === h ? 700 : 400, fontSize: '0.82rem' }}>
+                  {h}vk
+                </button>
+              ))}
+            </div>
           </div>
-        )}
+          {dates.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <label style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Positiot mitattu:</label>
+              <select value={selectedDate || ''} onChange={e => setSelectedDate(e.target.value || null)} style={selectStyle}>
+                <option value="">Uusin</option>
+                {dates.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
+          )}
+        </div>
       </div>
 
       {loading ? <div style={loadingStyle}>Ladataan hintadataa (voi kestää hetken ensimmäisellä kerralla)...</div>
@@ -103,6 +127,59 @@ export default function Verifiointi() {
                 <HitBadge label="Vahva" rate={stats.strong_bias_hit_rate} />
                 <HitBadge label="Lievä" rate={stats.mild_bias_hit_rate} />
               </div>
+            </div>
+          )}
+
+          {/* Komponenttianalyysi */}
+          {compAnalysis && compAnalysis.components && compAnalysis.components.length > 0 && (
+            <div style={{ ...card, marginBottom: '20px' }}>
+              <h3 style={{ color: '#e2e8f0', fontSize: '0.95rem', marginBottom: '6px' }}>
+                Komponenttianalyysi ({compAnalysis.analysis_weeks} viikkoa, {horizon}vk horisontti)
+              </h3>
+              <p style={{ color: '#64748b', fontSize: '0.78rem', marginBottom: '14px' }}>
+                Mikä komponentti ennustaa hintaliikettä? Vihreä = &gt;55%, keltainen = 50–55%, punainen = &lt;50%.
+                Trend = ennusta samaan suuntaan. Kontraarinen = ennusta vastakkaiseen suuntaan.
+              </p>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                  <thead>
+                    <tr>
+                      {['Komponentti', 'Trend HR', 'Kontraar. HR', 'Extreme Trend', 'Extreme Kontr.', 'N', 'Extreme N'].map((h, i) => (
+                        <th key={i} style={thStyle}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {compAnalysis.components.map(c => (
+                      <tr key={c.component} style={{
+                        background: c.component === compAnalysis.best_trend ? 'rgba(34,197,94,0.05)' :
+                                    c.component === 'Composite' ? 'rgba(59,130,246,0.05)' : 'transparent'
+                      }}>
+                        <td style={{ ...tdStyle, fontWeight: 700 }}>
+                          {c.component === 'Composite' ? '📊 ' : ''}{c.component} – {c.label}
+                          {c.component === compAnalysis.best_trend && ' 🏆'}
+                        </td>
+                        <td style={{ ...tdStyle, ...hrCell(c.trend_hit_rate) }}>{hrFmt(c.trend_hit_rate)}</td>
+                        <td style={{ ...tdStyle, ...hrCell(c.contrarian_hit_rate) }}>{hrFmt(c.contrarian_hit_rate)}</td>
+                        <td style={{ ...tdStyle, ...hrCell(c.extreme_trend_hr) }}>{hrFmt(c.extreme_trend_hr)}</td>
+                        <td style={{ ...tdStyle, ...hrCell(c.extreme_contrarian_hr) }}>{hrFmt(c.extreme_contrarian_hr)}</td>
+                        <td style={{ ...tdStyle, color: '#64748b' }}>{c.sample_count}</td>
+                        <td style={{ ...tdStyle, color: '#64748b' }}>{c.extreme_count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ marginTop: '10px', fontSize: '0.75rem', color: '#475569' }}>
+                Trend = signaali samaan suuntaan kuin komponentti. Kontraarinen = vastakkaiseen suuntaan.
+                Extreme = |z| &gt; {1.5} (parin erotus &gt; {3.0}).
+                Vihreä (&gt;55%) viittaa tilastolliseen etuun. Keltainen (50–55%) = rajatapaus. Punainen (&lt;50%) = ei etua.
+              </div>
+            </div>
+          )}
+          {compLoading && (
+            <div style={{ ...card, marginBottom: '20px', textAlign: 'center', padding: '24px', color: '#64748b' }}>
+              Analysoidaan komponentteja ({horizon}vk horisontti)...
             </div>
           )}
 
@@ -286,3 +363,13 @@ const badgeStyle = (bg, color) => ({
   display: 'inline-block', padding: '4px 12px', borderRadius: '6px',
   background: bg, color, fontSize: '0.82rem', fontWeight: 600,
 })
+
+// Komponenttianalyysi-apufunktiot
+const hrFmt = (v) => v == null ? '–' : `${Math.round(v * 100)}%`
+const hrCell = (v) => {
+  if (v == null) return { color: '#475569' }
+  const pct = v * 100
+  if (pct >= 55) return { color: '#22c55e', fontWeight: 700 }
+  if (pct >= 50) return { color: '#eab308', fontWeight: 600 }
+  return { color: '#ef4444', fontWeight: 600 }
+}

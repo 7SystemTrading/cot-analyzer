@@ -13,12 +13,14 @@ from app.database import get_db
 from app.models import CurrencyMetrics, PairMetrics
 from app.schemas import (
     CandleOut,
+    ComponentAnalysisResponse,
+    ComponentHitRates,
     VerificationPairRow,
     VerificationResponse,
     VerificationStatsResponse,
     VerificationWeekSummary,
 )
-from app.services.price_fetcher import fetch_candles, get_verification_week
+from app.services.price_fetcher import fetch_candles, get_verification_period, get_verification_week
 
 router = APIRouter(prefix="/api/v1/verification", tags=["verification"])
 logger = logging.getLogger(__name__)
@@ -118,9 +120,10 @@ def _build_pair_verification(
 @router.get("", response_model=VerificationResponse)
 def get_verification(
     report_date: Optional[str] = Query(None, description="YYYY-MM-DD, oletuksena uusin"),
+    horizon: int = Query(1, ge=1, le=8, description="Verifiointihorisontti viikkoina (1/2/4)"),
     db: Session = Depends(get_db),
 ):
-    """Verifiointi: vertaa COT-biasta seuraavan viikon hintakehitykseen."""
+    """Verifiointi: vertaa COT-biasta hintakehitykseen valitulla horisontilla."""
 
     # Raporttipäivä
     if report_date:
@@ -139,8 +142,8 @@ def get_verification(
             return VerificationResponse()
         rd = latest[0]
 
-    # Verifiointiviikko
-    verify_start, verify_end = get_verification_week(rd)
+    # Verifiointiperiodi (1/2/4 viikkoa)
+    verify_start, verify_end = get_verification_period(rd, horizon)
     publish_date = rd + timedelta(days=3)
 
     # Hae kaikki parit tälle viikolle
@@ -227,9 +230,10 @@ def get_verification(
 @router.get("/stats", response_model=VerificationStatsResponse)
 def get_verification_stats(
     weeks: int = Query(26, ge=1, le=260),
+    horizon: int = Query(1, ge=1, le=8, description="Verifiointihorisontti viikkoina"),
     db: Session = Depends(get_db),
 ):
-    """Kumulatiivinen osumisprosentti usean viikon yli."""
+    """Kumulatiivinen osumisprosentti usean viikon yli, valitulla horisontilla."""
 
     # Hae viimeisimmät N viikkoa joille on pair_metrics
     report_dates = (
@@ -252,7 +256,7 @@ def get_verification_stats(
     by_week = []
 
     for rd in report_dates:
-        verify_start, verify_end = get_verification_week(rd)
+        verify_start, verify_end = get_verification_period(rd, horizon)
 
         # Ohita jos verifiointiviikko on tulevaisuudessa
         if verify_end > date.today():
@@ -319,4 +323,204 @@ def get_verification_stats(
         strong_bias_hit_rate=round(sum(all_strong) / len(all_strong), 3) if all_strong else None,
         mild_bias_hit_rate=round(sum(all_mild) / len(all_mild), 3) if all_mild else None,
         by_week=by_week,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Komponenttianalyysi: selvitä mikä komponentti (A/B/C/D) oikeasti ennustaa
+# ---------------------------------------------------------------------------
+
+EXTREME_THRESHOLD = 1.5  # |z| > 1.5 = äärimmäinen
+
+# Analysoitavat komponentit: nimi, DB-sarakkeet base/quote
+_COMPONENT_DEFS = [
+    ("A", "Positioning (taso)", "z_current"),
+    ("B", "1vk momentum", "z_delta_1w"),
+    ("C", "4vk momentum", "z_delta_4w"),
+    ("D", "OI-osallistuminen", "z_oi_delta"),
+]
+
+
+def _safe_hr(correct_list):
+    if not correct_list:
+        return None
+    return round(sum(correct_list) / len(correct_list), 3)
+
+
+@router.get("/component-analysis", response_model=ComponentAnalysisResponse)
+def get_component_analysis(
+    weeks: int = Query(52, ge=10, le=260),
+    horizon: int = Query(1, ge=1, le=8, description="Verifiointihorisontti viikkoina"),
+    db: Session = Depends(get_db),
+):
+    """
+    Analysoi jokainen CurrencyScore-komponentti (A/B/C/D) erikseen
+    ja testaa sekä trendinmukaista että kontraarista tulkintaa.
+    """
+    from app.services.price_fetcher import fetch_all_pairs_candles, get_verification_period
+    from app.config import DISPLAY_PAIRS
+
+    # Hae viimeisimmät N raporttipäivää
+    report_dates = (
+        db.query(CurrencyMetrics.report_date)
+        .filter(CurrencyMetrics.currency_score.isnot(None))
+        .distinct()
+        .order_by(CurrencyMetrics.report_date.desc())
+        .limit(weeks)
+        .all()
+    )
+    report_dates = [r[0] for r in reversed(report_dates)]
+
+    if not report_dates:
+        return ComponentAnalysisResponse(horizon_weeks=horizon, analysis_weeks=weeks)
+
+    # Kerää data: per komponentti, per horisontti
+    # comp_name → {trend: [bool], contrarian: [bool], extreme_trend: [bool], extreme_contrarian: [bool]}
+    comp_results = {}
+    for comp_key, comp_label, _ in _COMPONENT_DEFS:
+        comp_results[comp_key] = {
+            "label": comp_label, "trend": [], "contrarian": [],
+            "extreme_trend": [], "extreme_contrarian": [],
+        }
+    # Yhdistelmä B+C
+    comp_results["B+C"] = {
+        "label": "Momentum (B+C)", "trend": [], "contrarian": [],
+        "extreme_trend": [], "extreme_contrarian": [],
+    }
+    # Nykyinen komposiitti
+    comp_results["Composite"] = {
+        "label": "Nykyinen malli", "trend": [], "contrarian": [],
+        "extreme_trend": [], "extreme_contrarian": [],
+    }
+
+    for rd in report_dates:
+        verify_start, verify_end = get_verification_period(rd, horizon)
+        if verify_end > date.today():
+            continue
+
+        # Hae valuuttametriikat tälle viikolle
+        ccy_rows = {
+            cm.currency: cm
+            for cm in db.query(CurrencyMetrics)
+            .filter(CurrencyMetrics.report_date == rd)
+            .filter(CurrencyMetrics.currency_score.isnot(None))
+            .all()
+        }
+        if len(ccy_rows) < 2:
+            continue
+
+        # Hae pari-metriikat
+        pair_rows = {
+            pm.pair: pm
+            for pm in db.query(PairMetrics)
+            .filter(PairMetrics.report_date == rd)
+            .filter(PairMetrics.pair_score.isnot(None))
+            .all()
+        }
+
+        # Hae hintadata kaikille pareille kerralla
+        all_pair_names = list(pair_rows.keys())
+        if not all_pair_names:
+            continue
+        all_candles = fetch_all_pairs_candles(db, all_pair_names, verify_start, verify_end)
+
+        # Analysoi jokainen pari
+        for base, quote in DISPLAY_PAIRS:
+            pair_name = f"{base}{quote}"
+            candles = all_candles.get(pair_name, [])
+            if not candles or len(candles) < 2:
+                continue
+
+            week_open = candles[0]["open"]
+            week_close = candles[-1]["close"]
+            if week_open == 0:
+                continue
+            went_up = week_close > week_open
+
+            base_cm = ccy_rows.get(base)
+            quote_cm = ccy_rows.get(quote)
+            if not base_cm or not quote_cm:
+                continue
+
+            # Per komponentti: laske parin z-score erotus = base_z - quote_z
+            for comp_key, comp_label, db_field in _COMPONENT_DEFS:
+                base_z = getattr(base_cm, db_field, None)
+                quote_z = getattr(quote_cm, db_field, None)
+                if base_z is None or quote_z is None:
+                    continue
+
+                pair_z = base_z - quote_z
+                if pair_z == 0:
+                    continue
+
+                is_positive = pair_z > 0
+                is_extreme = abs(pair_z) > EXTREME_THRESHOLD * 2  # parin z on kahden valuutan erotus
+
+                # Trend: ennusta samaan suuntaan kuin z
+                trend_correct = went_up if is_positive else not went_up
+                comp_results[comp_key]["trend"].append(trend_correct)
+                comp_results[comp_key]["contrarian"].append(not trend_correct)
+
+                if is_extreme:
+                    comp_results[comp_key]["extreme_trend"].append(trend_correct)
+                    comp_results[comp_key]["extreme_contrarian"].append(not trend_correct)
+
+            # B+C yhdistelmä
+            base_b = getattr(base_cm, "z_delta_1w", None)
+            base_c = getattr(base_cm, "z_delta_4w", None)
+            quote_b = getattr(quote_cm, "z_delta_1w", None)
+            quote_c = getattr(quote_cm, "z_delta_4w", None)
+            if all(v is not None for v in [base_b, base_c, quote_b, quote_c]):
+                bc_pair = (base_b + base_c) - (quote_b + quote_c)
+                if bc_pair != 0:
+                    trend_correct = (went_up if bc_pair > 0 else not went_up)
+                    comp_results["B+C"]["trend"].append(trend_correct)
+                    comp_results["B+C"]["contrarian"].append(not trend_correct)
+                    if abs(bc_pair) > EXTREME_THRESHOLD * 2:
+                        comp_results["B+C"]["extreme_trend"].append(trend_correct)
+                        comp_results["B+C"]["extreme_contrarian"].append(not trend_correct)
+
+            # Komposiitti (nykyinen malli)
+            pm = pair_rows.get(pair_name)
+            if pm and pm.pair_score is not None and pm.pair_score != 0:
+                trend_correct = went_up if pm.pair_score > 0 else not went_up
+                comp_results["Composite"]["trend"].append(trend_correct)
+                comp_results["Composite"]["contrarian"].append(not trend_correct)
+                if abs(pm.pair_score) > 1.5:
+                    comp_results["Composite"]["extreme_trend"].append(trend_correct)
+                    comp_results["Composite"]["extreme_contrarian"].append(not trend_correct)
+
+    # Muodosta vastaus
+    components = []
+    for key in ["A", "B", "C", "D", "B+C", "Composite"]:
+        r = comp_results[key]
+        components.append(ComponentHitRates(
+            component=key,
+            label=r["label"],
+            trend_hit_rate=_safe_hr(r["trend"]),
+            contrarian_hit_rate=_safe_hr(r["contrarian"]),
+            extreme_trend_hr=_safe_hr(r["extreme_trend"]),
+            extreme_contrarian_hr=_safe_hr(r["extreme_contrarian"]),
+            sample_count=len(r["trend"]),
+            extreme_count=len(r["extreme_trend"]),
+        ))
+
+    # Paras trendinmukainen ja kontraarinen
+    trend_best = max(
+        [c for c in components if c.trend_hit_rate is not None],
+        key=lambda c: c.trend_hit_rate,
+        default=None,
+    )
+    contrarian_best = max(
+        [c for c in components if c.contrarian_hit_rate is not None],
+        key=lambda c: c.contrarian_hit_rate,
+        default=None,
+    )
+
+    return ComponentAnalysisResponse(
+        horizon_weeks=horizon,
+        analysis_weeks=len(report_dates),
+        components=components,
+        best_trend=trend_best.component if trend_best else None,
+        best_contrarian=contrarian_best.component if contrarian_best else None,
     )
