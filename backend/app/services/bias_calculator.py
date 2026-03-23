@@ -203,8 +203,20 @@ def compute_bias_dashboard(
     strong_long.sort(key=lambda x: x["strength_index"], reverse=True)
     strong_short.sort(key=lambda x: x["strength_index"])
 
+    # Hae publish_date raakadatasta
+    publish_date = None
+    if w1:
+        pub_row = (
+            db.query(RawReport.publish_date)
+            .filter(RawReport.report_date == w1)
+            .first()
+        )
+        if pub_row and pub_row[0]:
+            publish_date = pub_row[0].isoformat()
+
     return {
         "report_date": w1.isoformat() if w1 else None,
+        "publish_date": publish_date,
         "threshold": threshold,
         "currencies": currencies_out,
         "strong_long": strong_long,

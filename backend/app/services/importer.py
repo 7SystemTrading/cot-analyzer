@@ -3,7 +3,7 @@ Tietokannan kirjoitusoperaatiot COT-datalle.
 Huolehtii validoinnista, duplikaattien ohituksesta ja audit trailista.
 """
 import logging
-from datetime import date
+from datetime import date, timedelta
 from typing import List, Optional
 
 import pandas as pd
@@ -89,8 +89,12 @@ def save_raw_data(
                 skipped += 1
                 continue
 
+            # Laske julkaisupäivä: report_date on tiistai, julkaisu on perjantai (+3 pv)
+            publish_date = report_date + timedelta(days=3)
+
             record = RawReport(
                 report_date=report_date,
+                publish_date=publish_date,
                 currency=str(row["currency"]),
                 contract_name=row.get("contract_name"),
                 open_interest_total=float(row["open_interest_total"]),

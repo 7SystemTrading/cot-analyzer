@@ -181,6 +181,7 @@ class BiasPairRow(BaseModel):
 
 class BiasDashboardResponse(BaseModel):
     report_date: Optional[date] = None
+    publish_date: Optional[date] = None
     threshold: float
     currencies: List[BiasCurrencyRow] = []
     strong_long: List[BiasPairRow] = []

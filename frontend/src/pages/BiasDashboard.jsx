@@ -61,7 +61,7 @@ export default function BiasDashboard() {
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
           {dates.length > 0 && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <label style={labelStyle}>Viikko:</label>
+              <label style={labelStyle}>Positiot mitattu:</label>
               <select value={selectedDate || ''} onChange={e => setSelectedDate(e.target.value || null)} style={selectStyle}>
                 <option value="">Uusin</option>
                 {dates.map(d => <option key={d} value={d}>{d}</option>)}
@@ -77,9 +77,10 @@ export default function BiasDashboard() {
         </div>
       </div>
 
-      {/* Raporttipäivä + yhteenveto */}
+      {/* Päivämäärät + yhteenveto */}
       <div style={{ display: 'flex', gap: '12px', marginBottom: '24px', flexWrap: 'wrap' }}>
-        <InfoBadge label="Raporttipäivä" value={data.report_date || '–'} />
+        <InfoBadge label="Positiot mitattu" value={data.report_date || '–'} />
+        <InfoBadge label="Julkaistu" value={data.publish_date || '–'} />
         <InfoBadge label="Long" value={`${data.strong_long.length} (${data.strong_long.filter(p => p.confirmed).length} strong)`} color={COLORS.long} />
         <InfoBadge label="Short" value={`${data.strong_short.length} (${data.strong_short.filter(p => p.confirmed).length} strong)`} color={COLORS.short} />
         <InfoBadge label="Neutral" value={data.neutral_count} color={COLORS.neutral} />

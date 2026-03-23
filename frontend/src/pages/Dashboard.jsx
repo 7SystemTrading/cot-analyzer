@@ -40,7 +40,7 @@ export default function Dashboard() {
         <h1 style={h1}>Dashboard</h1>
         {dates.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <label style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Viikko:</label>
+            <label style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Positiot mitattu:</label>
             <select
               value={selectedDate || ''}
               onChange={e => setSelectedDate(e.target.value || null)}

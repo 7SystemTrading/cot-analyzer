@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/v1/dashboard", tags=["dashboard"])
 
 def _get_data_status(db: Session) -> DataStatus:
     latest_raw = (
-        db.query(RawReport.report_date)
+        db.query(RawReport.report_date, RawReport.publish_date)
         .filter(RawReport.is_corrected == False)  # noqa: E712
         .order_by(RawReport.report_date.desc())
         .first()
@@ -22,6 +22,7 @@ def _get_data_status(db: Session) -> DataStatus:
         return DataStatus(status="no_data", message="Dataa ei ole ladattu. Aloita tuomalla COT-historia.")
 
     latest_date: date = latest_raw[0]
+    latest_publish: date = latest_raw[1]
     total_weeks = (
         db.query(RawReport.report_date)
         .filter(RawReport.is_corrected == False)  # noqa: E712
@@ -30,17 +31,17 @@ def _get_data_status(db: Session) -> DataStatus:
     )
 
     # Tarkista viive: CFTC julkaisee tiistain datan perjantaina.
-    # Jos uusin raporttipäivä on yli 14 päivää sitten, data on viivästynyt.
     days_old = (date.today() - latest_date).days
     if days_old > 14:
         status = "delayed"
-        message = f"Uusin saatavilla oleva data on {latest_date.isoformat()} ({days_old} päivää sitten)."
+        message = f"Uusin data mitattu {latest_date.isoformat()} ({days_old} päivää sitten)."
     else:
         status = "ok"
-        message = f"Data ajantasalla. Uusin raportti: {latest_date.isoformat()}."
+        message = f"Data ajantasalla."
 
     return DataStatus(
         latest_report_date=latest_date,
+        latest_publish_date=latest_publish,
         total_weeks=total_weeks,
         status=status,
         message=message,

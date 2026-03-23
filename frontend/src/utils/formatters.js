@@ -60,3 +60,12 @@ export const fmtDate = (d) => {
   if (!d) return '–'
   return new Date(d).toLocaleDateString('fi-FI', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
+
+// Päivämäärä viikonpäivän kanssa (esim. "ti 18.3.2026")
+export const fmtDateWithDay = (d) => {
+  if (!d) return '–'
+  const dt = new Date(d)
+  const weekday = dt.toLocaleDateString('fi-FI', { weekday: 'short' })
+  const dateStr = dt.toLocaleDateString('fi-FI', { day: 'numeric', month: 'numeric', year: 'numeric' })
+  return `${weekday} ${dateStr}`
+}

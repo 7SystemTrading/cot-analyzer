@@ -1,4 +1,4 @@
-import { fmtDate } from '../utils/formatters'
+import { fmtDateWithDay } from '../utils/formatters'
 
 export default function DataStatusBanner({ status }) {
   if (!status) return null
@@ -20,17 +20,28 @@ export default function DataStatusBanner({ status }) {
       fontSize: '0.85rem',
       display: 'flex',
       alignItems: 'center',
-      gap: '12px',
+      gap: '16px',
       flexWrap: 'wrap',
     }}>
       <span style={{ fontWeight: 700 }}>
         {status.status === 'ok' ? '✓ Ajantasalla' :
          status.status === 'delayed' ? '⚠ Viivästynyt' : '✗ Ei dataa'}
       </span>
-      <span>{status.message}</span>
+      {status.latest_report_date && (
+        <span>
+          <span style={{ opacity: 0.7 }}>Positiot mitattu:</span>{' '}
+          <strong>{fmtDateWithDay(status.latest_report_date)}</strong>
+        </span>
+      )}
+      {status.latest_publish_date && (
+        <span>
+          <span style={{ opacity: 0.7 }}>Julkaistu:</span>{' '}
+          {fmtDateWithDay(status.latest_publish_date)}
+        </span>
+      )}
       {status.total_weeks > 0 && (
-        <span style={{ marginLeft: 'auto', opacity: 0.8 }}>
-          Yhteensä {status.total_weeks} viikkoa historiassa
+        <span style={{ marginLeft: 'auto', opacity: 0.7 }}>
+          {status.total_weeks} viikkoa historiassa
         </span>
       )}
     </div>
