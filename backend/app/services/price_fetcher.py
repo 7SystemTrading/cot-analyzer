@@ -1,25 +1,22 @@
 """
-Hintadatan haku yfinancella ja SQLite-cache.
-Haetaan 7 USD-pohjaista paria yfinancesta ja lasketaan niistä kaikki 28 cross-paria.
-Tämä on sama logiikka kuin forex-brokereilla.
+COT Dashboard v2 – Price data fetcher and cache.
+Fetches weekly closing prices from yfinance for divergence calculations.
+Fetches 7 USD-base pairs and computes all 28 cross-pairs from them.
 """
 import logging
 from datetime import date, timedelta
-from typing import Dict, List, Optional
+from typing import Optional
 
-import numpy as np
-import yfinance as yf
 import pandas as pd
+import yfinance as yf
 from sqlalchemy.orm import Session
 
 from app.models import PriceData
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# USD-pohjaiset parit (haetaan suoraan yfinancesta)
-# ---------------------------------------------------------------------------
-USD_DIRECT_TICKERS = {
+# Yahoo Finance tickers for USD-base pairs
+_USD_TICKERS = {
     "EURUSD": "EURUSD=X",
     "GBPUSD": "GBPUSD=X",
     "AUDUSD": "AUDUSD=X",
@@ -29,312 +26,118 @@ USD_DIRECT_TICKERS = {
     "USDJPY": "USDJPY=X",
 }
 
-# ---------------------------------------------------------------------------
-# Cross-parien laskentareseptit: (pari_A, pari_B, operaatio)
-# Tyyppi "div": cross = A / B
-# Tyyppi "mul": cross = A * B
-# ---------------------------------------------------------------------------
-CROSS_RECIPES = {
-    # Tyyppi 1: molemmat XXX/USD → jako
-    "EURGBP": ("EURUSD", "GBPUSD", "div"),
-    "EURAUD": ("EURUSD", "AUDUSD", "div"),
-    "EURNZD": ("EURUSD", "NZDUSD", "div"),
-    "GBPAUD": ("GBPUSD", "AUDUSD", "div"),
-    "GBPNZD": ("GBPUSD", "NZDUSD", "div"),
-    "AUDNZD": ("AUDUSD", "NZDUSD", "div"),
-    # Tyyppi 2: XXX/USD * USD/YYY → kerto
-    "EURCAD": ("EURUSD", "USDCAD", "mul"),
-    "EURCHF": ("EURUSD", "USDCHF", "mul"),
-    "EURJPY": ("EURUSD", "USDJPY", "mul"),
-    "GBPCAD": ("GBPUSD", "USDCAD", "mul"),
-    "GBPCHF": ("GBPUSD", "USDCHF", "mul"),
-    "GBPJPY": ("GBPUSD", "USDJPY", "mul"),
-    "AUDCAD": ("AUDUSD", "USDCAD", "mul"),
-    "AUDCHF": ("AUDUSD", "USDCHF", "mul"),
-    "AUDJPY": ("AUDUSD", "USDJPY", "mul"),
-    "NZDCAD": ("NZDUSD", "USDCAD", "mul"),
-    "NZDCHF": ("NZDUSD", "USDCHF", "mul"),
-    "NZDJPY": ("NZDUSD", "USDJPY", "mul"),
-    # Tyyppi 3: molemmat USD/YYY → jako
-    "CADCHF": ("USDCHF", "USDCAD", "div"),
-    "CADJPY": ("USDJPY", "USDCAD", "div"),
-    "CHFJPY": ("USDJPY", "USDCHF", "div"),
-}
+_TIMEOUT = 30  # seconds
 
 
-# ---------------------------------------------------------------------------
-# Cache-funktiot (SQLite)
-# ---------------------------------------------------------------------------
+def _get_usd_rate(currency: str, usd_prices: dict[str, float]) -> Optional[float]:
+    """Return price of currency vs USD (base/USD or USD/base)."""
+    if f"{currency}USD" in usd_prices:
+        return usd_prices[f"{currency}USD"]
+    if f"USD{currency}" in usd_prices:
+        v = usd_prices[f"USD{currency}"]
+        return 1.0 / v if v else None
+    return None
 
-def _get_cached(db: Session, pair: str, start: date, end: date) -> List[PriceData]:
-    return (
-        db.query(PriceData)
+
+def _cross_price(base: str, quote: str, usd_prices: dict[str, float]) -> Optional[float]:
+    """Compute cross-pair price from USD rates."""
+    if base == "USD":
+        usd_quote = usd_prices.get(f"USD{quote}")
+        return usd_quote
+    if quote == "USD":
+        base_usd = usd_prices.get(f"{base}USD")
+        return base_usd
+
+    base_usd  = _get_usd_rate(base, usd_prices)
+    quote_usd = _get_usd_rate(quote, usd_prices)
+    if base_usd and quote_usd and quote_usd != 0:
+        return base_usd / quote_usd
+    return None
+
+
+def fetch_weekly_closes(
+    pair: str,
+    start: date,
+    end: date,
+    db: Session,
+) -> list[float]:
+    """
+    Return list of weekly closing prices for a pair between start and end.
+    Checks DB cache first; fetches from yfinance if needed.
+    """
+    # Try cache
+    cached = (
+        db.query(PriceData.date, PriceData.close)
         .filter(PriceData.pair == pair, PriceData.date >= start, PriceData.date <= end)
         .order_by(PriceData.date)
         .all()
     )
+    if cached:
+        return [float(r.close) for r in cached]
+
+    # Fetch from yfinance
+    base  = pair[:3]
+    quote = pair[3:]
+
+    try:
+        tickers = list(_USD_TICKERS.values())
+        data = yf.download(
+            tickers,
+            start=str(start - timedelta(days=7)),
+            end=str(end + timedelta(days=1)),
+            interval="1wk",
+            progress=False,
+            timeout=_TIMEOUT,
+        )
+        if data.empty:
+            return []
+
+        closes = data["Close"] if "Close" in data.columns else data.xs("Close", axis=1, level=0)
+
+        results = []
+        for _, row in closes.iterrows():
+            usd_prices: dict[str, float] = {}
+            for pair_name, ticker in _USD_TICKERS.items():
+                val = row.get(ticker)
+                if val and not pd.isna(val):
+                    usd_prices[pair_name] = float(val)
+
+            price = _cross_price(base, quote, usd_prices)
+            if price:
+                row_date = row.name.date() if hasattr(row.name, "date") else row.name
+                results.append((row_date, price))
+
+                # Cache
+                existing = (
+                    db.query(PriceData)
+                    .filter(PriceData.pair == pair, PriceData.date == row_date)
+                    .first()
+                )
+                if not existing:
+                    db.add(PriceData(
+                        pair=pair, date=row_date,
+                        open=price, high=price, low=price, close=price,
+                    ))
+
+        db.commit()
+        return [p for _, p in sorted(results) if start <= _ <= end]
+
+    except Exception as e:
+        logger.warning("yfinance error for %s: %s", pair, e)
+        return []
 
 
-def _save_one(db: Session, pair: str, d: date, o: float, h: float, l: float, c: float):
-    exists = db.query(PriceData).filter(PriceData.pair == pair, PriceData.date == d).first()
-    if not exists:
-        db.add(PriceData(pair=pair, date=d, open=o, high=h, low=l, close=c))
-
-
-# ---------------------------------------------------------------------------
-# Yfinance: hae 7 USD-pohjaista paria yhdellä kutsulla
-# ---------------------------------------------------------------------------
-
-def _fetch_usd_candles(db: Session, start: date, end: date) -> Dict[str, pd.DataFrame]:
+def get_recent_weekly_closes(
+    pair: str,
+    report_date: date,
+    weeks: int,
+    db: Session,
+) -> list[float]:
     """
-    Hakee 7 USD-parin päiväkynttilät yfinancesta.
-    Palauttaa dict: {"EURUSD": DataFrame(Open,High,Low,Close), ...}
-    Cachettaa samalla SQLiteen.
+    Return the last `weeks` weekly closes ending at report_date.
+    Used for divergence slope calculation.
     """
-    # Tarkista mitkä parit puuttuvat cachesta
-    pairs_to_fetch = []
-    for pair in USD_DIRECT_TICKERS:
-        cached = _get_cached(db, pair, start, end)
-        cached_dates = {c.date for c in cached}
-        d = start
-        while d <= end:
-            if d.weekday() < 5 and d not in cached_dates:
-                pairs_to_fetch.append(pair)
-                break
-            d += timedelta(days=1)
-
-    # Hae puuttuvat yfinancesta
-    if pairs_to_fetch and end <= date.today():
-        tickers = [USD_DIRECT_TICKERS[p] for p in pairs_to_fetch]
-        ticker_str = " ".join(tickers)
-        fetch_end = end + timedelta(days=1)
-
-        try:
-            logger.info("Haetaan USD-pohjaiset parit yfinancesta: %s (%s – %s)", ticker_str, start, end)
-            df = yf.download(
-                ticker_str,
-                start=start.isoformat(),
-                end=fetch_end.isoformat(),
-                interval="1d",
-                progress=False,
-                auto_adjust=True,
-                group_by="ticker" if len(tickers) > 1 else None,
-                timeout=30,
-            )
-
-            if df is not None and not df.empty:
-                for pair, ticker in USD_DIRECT_TICKERS.items():
-                    if pair not in pairs_to_fetch:
-                        continue
-                    try:
-                        if len(tickers) == 1:
-                            pair_df = df
-                        else:
-                            # MultiIndex: (Ticker, OHLC)
-                            ticker_clean = ticker  # e.g. "EURUSD=X"
-                            if ticker_clean in df.columns.get_level_values(0):
-                                pair_df = df[ticker_clean]
-                            else:
-                                logger.warning("Ticker %s ei löydy yfinance-datasta", ticker_clean)
-                                continue
-
-                        if isinstance(pair_df.columns, pd.MultiIndex):
-                            pair_df.columns = pair_df.columns.get_level_values(0)
-
-                        pair_df = pair_df.dropna(subset=["Close"])
-                        for idx, row in pair_df.iterrows():
-                            d = idx.date() if hasattr(idx, 'date') else idx
-                            _save_one(db, pair, d, float(row["Open"]), float(row["High"]),
-                                      float(row["Low"]), float(row["Close"]))
-                        logger.info("Tallennettu: %s (%d kynttilää)", pair, len(pair_df))
-                    except Exception as e:
-                        logger.warning("Parin %s parsinta epäonnistui: %s", pair, e)
-
-                db.commit()
-            else:
-                logger.warning("Yfinance palautti tyhjän tuloksen")
-        except Exception as e:
-            logger.error("Yfinance-haku epäonnistui: %s", e)
-
-    # Palauta kaikki USD-parit cachesta DataFrameina
-    result = {}
-    for pair in USD_DIRECT_TICKERS:
-        cached = _get_cached(db, pair, start, end)
-        if cached:
-            rows = [{"date": c.date, "Open": c.open, "High": c.high, "Low": c.low, "Close": c.close}
-                    for c in cached]
-            pdf = pd.DataFrame(rows).set_index("date")
-            result[pair] = pdf
-    return result
-
-
-# ---------------------------------------------------------------------------
-# Cross-parien laskenta USD-pareista
-# ---------------------------------------------------------------------------
-
-def _calculate_cross(pair: str, usd_data: Dict[str, pd.DataFrame]) -> Optional[pd.DataFrame]:
-    """
-    Laskee cross-parin OHLC USD-pohjaisista pareista.
-    Palauttaa DataFramen tai None jos puuttuu dataa.
-    """
-    if pair in USD_DIRECT_TICKERS:
-        return usd_data.get(pair)
-
-    recipe = CROSS_RECIPES.get(pair)
-    if not recipe:
-        logger.warning("Ei reseptiä parille %s", pair)
-        return None
-
-    pair_a, pair_b, op = recipe
-    df_a = usd_data.get(pair_a)
-    df_b = usd_data.get(pair_b)
-
-    if df_a is None or df_b is None or df_a.empty or df_b.empty:
-        logger.warning("Puuttuvaa USD-dataa cross-laskentaan: %s (tarvitaan %s, %s)", pair, pair_a, pair_b)
-        return None
-
-    # Yhdistä päivämäärällä (vain yhteiset päivät)
-    merged = df_a.join(df_b, lsuffix="_a", rsuffix="_b", how="inner")
-    if merged.empty:
-        return None
-
-    result_rows = []
-    for idx, row in merged.iterrows():
-        if op == "mul":
-            cross_open = row["Open_a"] * row["Open_b"]
-            cross_close = row["Close_a"] * row["Close_b"]
-            # High/Low: approx (ei tiedä intraday-ajoitusta)
-            cross_high = max(row["High_a"] * row["High_b"], row["High_a"] * row["Low_b"],
-                             row["Low_a"] * row["High_b"])
-            cross_low = min(row["Low_a"] * row["Low_b"], row["Low_a"] * row["High_b"],
-                            row["High_a"] * row["Low_b"])
-        else:  # div
-            if row["Open_b"] == 0 or row["Close_b"] == 0:
-                continue
-            cross_open = row["Open_a"] / row["Open_b"]
-            cross_close = row["Close_a"] / row["Close_b"]
-            # High/Low: A_high / B_low ≈ max, A_low / B_high ≈ min
-            cross_high = max(row["High_a"] / row["Low_b"], row["Low_a"] / row["High_b"],
-                             row["High_a"] / row["High_b"])
-            cross_low = min(row["Low_a"] / row["High_b"], row["High_a"] / row["Low_b"],
-                            row["Low_a"] / row["Low_b"])
-
-        result_rows.append({
-            "date": idx,
-            "Open": cross_open,
-            "High": cross_high,
-            "Low": cross_low,
-            "Close": cross_close,
-        })
-
-    if not result_rows:
-        return None
-    return pd.DataFrame(result_rows).set_index("date")
-
-
-# ---------------------------------------------------------------------------
-# Julkinen API
-# ---------------------------------------------------------------------------
-
-def fetch_candles(db: Session, pair: str, start: date, end: date) -> List[dict]:
-    """
-    Hae päivittäinen OHLC-data parille aikavälillä.
-    1. Tarkista cache
-    2. Jos puuttuu: hae USD-parit yfinancesta → laske cross-parit → cacheta
-    3. Palauta lista dicttejä
-    """
-    # Tarkista cache ensin
-    cached = _get_cached(db, pair, start, end)
-    expected_days = sum(1 for d_offset in range((end - start).days + 1)
-                        if (start + timedelta(days=d_offset)).weekday() < 5)
-
-    if len(cached) >= expected_days:
-        # Kaikki päivät cachessa
-        return [{"date": c.date.isoformat(), "open": round(c.open, 5),
-                 "high": round(c.high, 5), "low": round(c.low, 5), "close": round(c.close, 5)}
-                for c in cached]
-
-    # Puuttuu dataa → hae USD-parit ja laske kaikki
-    usd_data = _fetch_usd_candles(db, start, end)
-
-    if pair in USD_DIRECT_TICKERS:
-        # USD-pari on jo cachessa _fetch_usd_candles:n jälkeen
-        pass
-    else:
-        # Laske cross-pari ja tallenna cacheen
-        cross_df = _calculate_cross(pair, usd_data)
-        if cross_df is not None and not cross_df.empty:
-            for idx, row in cross_df.iterrows():
-                d = idx if isinstance(idx, date) else idx
-                _save_one(db, pair, d, float(row["Open"]), float(row["High"]),
-                          float(row["Low"]), float(row["Close"]))
-            db.commit()
-            logger.info("Cross-pari %s laskettu ja tallennettu (%d kynttilää)", pair, len(cross_df))
-
-    # Hae lopullinen tulos cachesta
-    final = _get_cached(db, pair, start, end)
-    return [{"date": c.date.isoformat(), "open": round(c.open, 5),
-             "high": round(c.high, 5), "low": round(c.low, 5), "close": round(c.close, 5)}
-            for c in final]
-
-
-def fetch_all_pairs_candles(db: Session, pairs: List[str], start: date, end: date) -> Dict[str, List[dict]]:
-    """
-    Hae OHLC-data KAIKILLE pareille kerralla (optimoitu: 1 yfinance-kutsu).
-    Palauttaa dict: {"EURUSD": [{date, open, high, low, close}, ...], ...}
-    """
-    # Hae USD-parit kerran
-    usd_data = _fetch_usd_candles(db, start, end)
-
-    result = {}
-    for pair in pairs:
-        # Tarkista cache
-        cached = _get_cached(db, pair, start, end)
-        expected_days = sum(1 for d_offset in range((end - start).days + 1)
-                            if (start + timedelta(days=d_offset)).weekday() < 5)
-
-        if len(cached) >= expected_days:
-            result[pair] = [{"date": c.date.isoformat(), "open": round(c.open, 5),
-                             "high": round(c.high, 5), "low": round(c.low, 5), "close": round(c.close, 5)}
-                            for c in cached]
-            continue
-
-        # Laske ja cacheta
-        if pair not in USD_DIRECT_TICKERS:
-            cross_df = _calculate_cross(pair, usd_data)
-            if cross_df is not None and not cross_df.empty:
-                for idx, row in cross_df.iterrows():
-                    _save_one(db, pair, idx, float(row["Open"]), float(row["High"]),
-                              float(row["Low"]), float(row["Close"]))
-                db.commit()
-
-        final = _get_cached(db, pair, start, end)
-        result[pair] = [{"date": c.date.isoformat(), "open": round(c.open, 5),
-                         "high": round(c.high, 5), "low": round(c.low, 5), "close": round(c.close, 5)}
-                        for c in final]
-
-    return result
-
-
-def get_verification_week(report_date: date) -> tuple[date, date]:
-    """
-    Laskee verifiointiviikon alun ja lopun.
-    report_date = tiistai (mittauspäivä)
-    julkaisu = perjantai (+3 pv)
-    verifiointi = seuraava ma (+6 pv) – pe (+10 pv)
-    """
-    verify_start = report_date + timedelta(days=6)
-    verify_end = report_date + timedelta(days=10)
-    return verify_start, verify_end
-
-
-def get_verification_period(report_date: date, horizon_weeks: int = 1) -> tuple[date, date]:
-    """
-    Laskee verifiointiperiodin alun ja lopun.
-    horizon_weeks=1: ma–pe (normaali verifiointiviikko)
-    horizon_weeks=2: ma–2.viikon pe
-    horizon_weeks=4: ma–4.viikon pe
-    """
-    verify_start = report_date + timedelta(days=6)  # seuraava maanantai
-    verify_end = verify_start + timedelta(days=horizon_weeks * 7 - 3)  # viimeinen perjantai
-    return verify_start, verify_end
+    end   = report_date
+    start = report_date - timedelta(weeks=weeks + 2)
+    closes = fetch_weekly_closes(pair, start, end, db)
+    return closes[-weeks:] if len(closes) >= weeks else closes

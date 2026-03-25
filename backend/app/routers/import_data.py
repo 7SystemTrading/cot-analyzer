@@ -1,178 +1,90 @@
+"""
+POST /api/v1/data/fetch   – fetch CFTC data (year or all recent)
+GET  /api/v1/data/status  – data status, latest week, import logs
+"""
 import logging
-from typing import List, Optional
+from datetime import date
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.database import SessionLocal, get_db
-from app.models import ImportLog
-from app.schemas import ImportLogOut, ImportResult
+from app.database import get_db
+from app.models import CotRaw, ImportLog
+from app.schemas import DataStatusResponse, ImportLogItem
+from app.services.calculator import recalculate_all
+from app.services.cot_fetcher import fetch_latest, fetch_year
+from app.services.importer import save_raw_data
 
-router = APIRouter(prefix="/api/v1/import", tags=["import"])
+router = APIRouter(prefix="/api/v1/data", tags=["data"])
 logger = logging.getLogger(__name__)
 
 
-async def _bg_recalculate(session_factory):
-    """Taustatyö: laskee kaiken uudelleen importin jälkeen."""
-    from app.services.calculator import recalculate_all
-    db = session_factory()
-    try:
-        recalculate_all(db)
-    except Exception as e:
-        logger.error("Taustatyö recalculate_all epäonnistui: %s", e)
-    finally:
-        db.close()
-
-
-@router.post("/upload", response_model=ImportResult)
-async def upload_file(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-):
-    """Lataa CSV tai Excel -tiedoston ja tuo datan tietokantaan."""
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="Tiedostonimi puuttuu.")
-
-    allowed_ext = (".csv", ".xlsx", ".xls")
-    if not any(file.filename.lower().endswith(ext) for ext in allowed_ext):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Tuetut tiedostomuodot: {', '.join(allowed_ext)}",
-        )
-
-    content = await file.read()
-    if len(content) == 0:
-        raise HTTPException(status_code=400, detail="Tiedosto on tyhjä.")
-
-    from app.services.cot_fetcher import parse_uploaded_file
-    from app.services.importer import save_raw_data
-
-    try:
-        df = parse_uploaded_file(content, file.filename)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-
-    if df.empty:
-        raise HTTPException(
-            status_code=422,
-            detail="Tiedostosta ei löytynyt tunnistettavaa COT-dataa.",
-        )
-
-    log = save_raw_data(db, df, source_type="manual", source_file=file.filename)
-
-    if log.rows_inserted > 0:
-        background_tasks.add_task(_bg_recalculate, SessionLocal)
-
-    errors = log.errors.split("\n") if log.errors else []
-    return ImportResult(
-        status=log.status,
-        rows_total=log.rows_total,
-        rows_inserted=log.rows_inserted,
-        rows_skipped=log.rows_skipped,
-        errors=errors,
-        message=(
-            f"Tuonti onnistui: {log.rows_inserted} uutta riviä tallennettu, "
-            f"{log.rows_skipped} ohitettu (duplikaatit)."
-            if log.status != "failed"
-            else f"Tuonti epäonnistui: {', '.join(errors)}"
-        ),
-    )
-
-
-@router.post("/fetch-history", response_model=ImportResult)
-async def fetch_history(
-    background_tasks: BackgroundTasks,
-    year: Optional[int] = Query(None, description="Yksittäinen vuosi. Jätä tyhjäksi kaikelle historialle (2010–nyt)."),
-    db: Session = Depends(get_db),
-):
-    """Hakee historiallisen COT-datan CFTC:ltä (vuosittaiset ZIP-tiedostot)."""
-    from app.services.cot_fetcher import fetch_history_all, fetch_year
-    from app.services.importer import save_raw_data
-
+async def _do_fetch_and_recalc(year: int | None, db: Session) -> None:
     try:
         if year:
             df = await fetch_year(year)
-            source_file = f"cftc_history_{year}"
         else:
-            df = await fetch_history_all()
-            source_file = "cftc_history_all"
+            df = await fetch_latest()
+
+        if df.empty:
+            logger.warning("Fetch returned no data")
+            return
+
+        save_raw_data(db, df, source_type="auto", source_file=f"fetch_{year or 'latest'}")
+        recalculate_all(db)
+        logger.info("Fetch and recalculation complete")
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"CFTC-haku epäonnistui: {e}")
-
-    if df.empty:
-        raise HTTPException(
-            status_code=404,
-            detail=f"CFTC:ltä ei saatu dataa {'vuodelle ' + str(year) if year else '(kaikki vuodet)'}.",
-        )
-
-    log = save_raw_data(db, df, source_type="history", source_file=source_file)
-
-    if log.rows_inserted > 0:
-        background_tasks.add_task(_bg_recalculate, SessionLocal)
-
-    errors = log.errors.split("\n") if log.errors else []
-    return ImportResult(
-        status=log.status,
-        rows_total=log.rows_total,
-        rows_inserted=log.rows_inserted,
-        rows_skipped=log.rows_skipped,
-        errors=errors,
-        message=(
-            f"Historia haettu: {log.rows_inserted} uutta riviä tallennettu."
-            if log.status != "failed"
-            else f"Haku epäonnistui: {', '.join(errors)}"
-        ),
-    )
+        logger.error("Fetch failed: %s", e)
 
 
-@router.post("/fetch-latest", response_model=ImportResult)
-async def fetch_latest(
-    background_tasks: BackgroundTasks,
+@router.post("/fetch")
+async def fetch_data(
+    year: int | None = Query(None, description="Specific year, or omit for latest"),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     db: Session = Depends(get_db),
 ):
-    """Hakee viimeisimmän viikon COT-datan CFTC:n API:sta."""
-    from app.services.cot_fetcher import fetch_current_week
-    from app.services.importer import save_raw_data
-
-    try:
-        df = await fetch_current_week()
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"CFTC-haku epäonnistui: {e}")
-
-    if df.empty:
-        raise HTTPException(status_code=404, detail="CFTC:ltä ei saatu dataa.")
-
-    log = save_raw_data(db, df, source_type="auto", source_file="cftc_weekly")
-
-    if log.rows_inserted > 0:
-        background_tasks.add_task(_bg_recalculate, SessionLocal)
-
-    errors = log.errors.split("\n") if log.errors else []
-    return ImportResult(
-        status=log.status,
-        rows_total=log.rows_total,
-        rows_inserted=log.rows_inserted,
-        rows_skipped=log.rows_skipped,
-        errors=errors,
-        message=(
-            f"Uusin viikko haettu: {log.rows_inserted} uutta riviä tallennettu."
-            if log.status != "failed"
-            else f"Haku epäonnistui: {', '.join(errors)}"
-        ),
-    )
+    """Trigger a CFTC data fetch. Runs in background."""
+    background_tasks.add_task(_do_fetch_and_recalc, year, db)
+    return {"status": "started", "year": year or "latest"}
 
 
-@router.get("/logs", response_model=List[ImportLogOut])
-def get_import_logs(
-    limit: int = Query(50, ge=1, le=500),
+@router.get("/status", response_model=DataStatusResponse)
+def get_data_status(
     db: Session = Depends(get_db),
 ):
-    """Palauttaa viimeisimmät import-lokit."""
-    rows = (
+    latest = (
+        db.query(CotRaw.report_date)
+        .order_by(CotRaw.report_date.desc())
+        .first()
+    )
+    total_rows  = db.query(CotRaw).count()
+    total_weeks = db.query(CotRaw.report_date).distinct().count()
+    currencies  = [r[0] for r in db.query(CotRaw.currency).distinct().order_by(CotRaw.currency).all()]
+
+    logs = (
         db.query(ImportLog)
         .order_by(ImportLog.imported_at.desc())
-        .limit(limit)
+        .limit(10)
         .all()
     )
-    return [ImportLogOut.model_validate(r) for r in rows]
+
+    return DataStatusResponse(
+        latest_report_date=latest[0] if latest else None,
+        total_weeks=total_weeks,
+        total_rows=total_rows,
+        currencies_covered=currencies,
+        recent_logs=[
+            ImportLogItem(
+                id=lg.id,
+                imported_at=str(lg.imported_at),
+                source_type=lg.source_type,
+                source_file=lg.source_file,
+                rows_total=lg.rows_total or 0,
+                rows_inserted=lg.rows_inserted or 0,
+                rows_skipped=lg.rows_skipped or 0,
+                status=lg.status or "ok",
+                errors=lg.errors,
+            )
+            for lg in logs
+        ],
+    )

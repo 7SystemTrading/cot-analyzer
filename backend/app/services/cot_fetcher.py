@@ -1,204 +1,145 @@
 """
-CFTC COT Financial Futures -datan haku.
-Tukee sekä historiallista bulk-latausta (ZIP vuosittain) että
-viimeisimmän viikon hakemista CFTC:n julkisesta API:sta.
+COT Dashboard v2 – CFTC Legacy COT data fetcher.
+
+Source: deahistfo{year}.zip  (Futures Only, Legacy COT format)
+Contains: Non-commercial / Commercial / Non-reportable / Open Interest
 """
 import io
 import logging
 import zipfile
-from datetime import date, datetime, timedelta
+from datetime import date
 from typing import Optional
 
 import httpx
 import pandas as pd
 
-from app.config import (
-    CFTC_COLUMNS,
-    CFTC_CURRENT_URL,
-    CFTC_FIRST_YEAR,
-    CFTC_HISTORY_URL_TEMPLATE,
-    CURRENCIES,
-    CURRENCY_CONTRACTS,
-)
+from app.config import CFTC_BASE_URL, COT_COLUMNS, CURRENCY_CONTRACTS
 
 logger = logging.getLogger(__name__)
 
-# Sopimustunnisteet: etsitään osittaisella nimellä (isoilla kirjaimilla)
-_CONTRACT_SEARCH: dict[str, str] = {
-    ccy: name.upper() for ccy, name in CURRENCY_CONTRACTS.items()
-}
+_TIMEOUT = 60  # seconds
 
 
-def _find_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
-    """Etsii ensimmäisen vastaavan sarakkeen. Case-insensitive."""
-    df_cols_upper = {c.upper(): c for c in df.columns}
-    for cand in candidates:
-        if cand.upper() in df_cols_upper:
-            return df_cols_upper[cand.upper()]
+def _find_column(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
+    """Return the first matching column name (case-insensitive)."""
+    lower_cols = {c.lower(): c for c in df.columns}
+    for candidate in candidates:
+        if candidate.lower() in lower_cols:
+            return lower_cols[candidate.lower()]
     return None
 
 
-def _parse_raw_df(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Poimitaan CFTC:n raakadataframesta tarvittavat valuutat.
-    Tukee useita sarakenimi-variantteja (Excel/CSV/API-muodot eroavat).
-    """
-    # Normalisoidaan sarakenimet (trim)
-    df.columns = [c.strip() for c in df.columns]
+def _parse_zip(content: bytes) -> pd.DataFrame:
+    """Extract and parse the Legacy COT file from ZIP.
 
-    # Etsitään sarakkeet joustavasti – CFTC käyttää eri nimiä eri lähteissä
-    date_col = _find_column(df, [
-        "Report_Date_as_MM_DD_YYYY",
-        "Report_Date_as_YYYY_MM_DD",
-        "Report_Date_as_YYYY-MM-DD",
-        "As_of_Date_In_Form_YYMMDD",
-    ])
-    market_col = _find_column(df, [
-        "Market_and_Exchange_Names",
-        "Contract_Market_Name",
-    ])
-    oi_col = _find_column(df, ["Open_Interest_All"])
-    long_col = _find_column(df, ["Lev_Money_Positions_Long_All"])
-    short_col = _find_column(df, ["Lev_Money_Positions_Short_All"])
-    spread_col = _find_column(df, ["Lev_Money_Positions_Spread_All"])
+    Legacy COT ZIPs contain a plain-text CSV (e.g. annualof.txt).
+    """
+    with zipfile.ZipFile(io.BytesIO(content)) as zf:
+        names = zf.namelist()
+        # Prefer XLS/CSV; fall back to any .txt (Legacy COT uses annualof.txt)
+        target = next(
+            (n for n in names if n.lower().endswith((".xls", ".xlsx", ".csv"))),
+            None,
+        ) or next(
+            (n for n in names if n.lower().endswith(".txt")),
+            None,
+        )
+        if not target:
+            raise ValueError(f"No data file found in ZIP. Contents: {names}")
+        raw = zf.read(target)
 
-    missing = []
-    if not date_col: missing.append("date")
-    if not market_col: missing.append("market")
-    if not oi_col: missing.append("open_interest")
-    if not long_col: missing.append("lev_long")
-    if not short_col: missing.append("lev_short")
+    if target.lower().endswith((".xls", ".xlsx")):
+        df = pd.read_excel(io.BytesIO(raw), engine="xlrd")
+    else:
+        # Legacy COT .txt files are comma-separated
+        df = pd.read_csv(io.BytesIO(raw), low_memory=False)
+
+    logger.debug("Parsed %d rows, %d columns from %s", len(df), len(df.columns), target)
+    return df
+
+
+def _extract_currencies(df: pd.DataFrame) -> pd.DataFrame:
+    """Filter rows for the 8 forex currencies and rename to standard keys."""
+    col_map = {}
+    for key, canonical in COT_COLUMNS.items():
+        found = _find_column(df, [canonical])
+        if found:
+            col_map[key] = found
+        else:
+            logger.warning("Column not found: %s", canonical)
+
+    required = ["market", "date", "open_interest", "nc_long", "nc_short",
+                "comm_long", "comm_short", "nr_long", "nr_short"]
+    missing = [k for k in required if k not in col_map]
     if missing:
-        raise ValueError(f"Puuttuvat sarakkeet CFTC-datasta: {missing}. Löydetyt: {list(df.columns[:10])}...")
+        raise ValueError(
+            f"Missing required columns: {missing}. "
+            f"Available: {list(df.columns[:20])}"
+        )
+
+    date_col   = col_map["date"]
+    market_col = col_map["market"]
+
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+    df = df.dropna(subset=[date_col])
 
     rows = []
-    for ccy, search_str in _CONTRACT_SEARCH.items():
-        # Tarkennettu haku: USD INDEX ei saa osua AUSTRALIAN DOLLAR jne.
-        mask = df[market_col].str.upper().str.contains(search_str, na=False)
-        subset = df[mask]
-
-        # NZ DOLLAR voi osua myös "NEW ZEALAND DOLLAR", "NZ DOLLAR" jne.
-        # USD INDEX ei saa osua muihin INDEX-nimiin
-        if ccy == "USD":
-            # Tarkennetaan: vain "USD INDEX" – ei esim. "S&P 500 INDEX"
-            mask = df[market_col].str.upper().str.startswith("USD INDEX", na=False)
-            subset = df[mask]
+    for currency, prefix in CURRENCY_CONTRACTS.items():
+        mask   = df[market_col].astype(str).str.startswith(prefix)
+        subset = df[mask].copy()
 
         if subset.empty:
-            logger.warning("Valuuttaa %s ei löydy raportista (haku: '%s')", ccy, search_str)
+            logger.warning("No rows for %s (prefix: %s)", currency, prefix)
             continue
 
         for _, row in subset.iterrows():
             try:
-                report_date = pd.to_datetime(row[date_col]).date()
-                spreading = float(row[spread_col]) if spread_col and pd.notna(row.get(spread_col)) else 0.0
                 rows.append({
-                    "report_date": report_date,
-                    "currency": ccy,
-                    "contract_name": str(row[market_col]).strip(),
-                    "open_interest_total": float(row[oi_col]),
-                    "lev_long": float(row[long_col]),
-                    "lev_short": float(row[short_col]),
-                    "lev_spreading": spreading,
+                    "report_date":   row[date_col].date(),
+                    "currency":      currency,
+                    "contract_name": str(row[market_col]),
+                    "nc_long":       float(row[col_map["nc_long"]]),
+                    "nc_short":      float(row[col_map["nc_short"]]),
+                    "comm_long":     float(row[col_map["comm_long"]]),
+                    "comm_short":    float(row[col_map["comm_short"]]),
+                    "nr_long":       float(row[col_map["nr_long"]]),
+                    "nr_short":      float(row[col_map["nr_short"]]),
+                    "open_interest": float(row[col_map["open_interest"]]),
                 })
-            except (ValueError, TypeError) as e:
-                logger.warning("Virhe rivin parsinnassa (%s): %s", ccy, e)
+            except (KeyError, ValueError) as e:
+                logger.debug("Skipping row for %s: %s", currency, e)
 
-    if rows:
-        logger.info("Parsittu %d riviä, valuutat: %s", len(rows), sorted({r['currency'] for r in rows}))
-    return pd.DataFrame(rows) if rows else pd.DataFrame()
+    if not rows:
+        return pd.DataFrame()
 
-
-async def fetch_current_week() -> pd.DataFrame:
-    """Hakee uusimman viikon COT-datan CFTC:n julkisesta CSV-API:sta."""
-    logger.info("Haetaan viikkodata: %s", CFTC_CURRENT_URL)
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.get(CFTC_CURRENT_URL)
-        resp.raise_for_status()
-    df = pd.read_csv(io.StringIO(resp.text), low_memory=False)
-    return _parse_raw_df(df)
+    result = pd.DataFrame(rows).sort_values("report_date").reset_index(drop=True)
+    logger.info(
+        "Extracted %d rows for %d currencies",
+        len(result), result["currency"].nunique()
+    )
+    return result
 
 
 async def fetch_year(year: int) -> pd.DataFrame:
-    """
-    Hakee yhden vuoden COT-historian CFTC:n ZIP-tiedostosta.
-    Palauttaa parsitun DataFramen.
-    """
-    url = CFTC_HISTORY_URL_TEMPLATE.format(year=year)
-    logger.info("Haetaan historiadata vuodelle %d: %s", year, url)
+    """Download and parse one year of Legacy COT data."""
+    url = CFTC_BASE_URL.format(year=year)
+    logger.info("Fetching COT %d from %s", year, url)
 
-    async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as client:
         resp = await client.get(url)
         resp.raise_for_status()
 
-    zip_bytes = io.BytesIO(resp.content)
-    all_dfs = []
-
-    with zipfile.ZipFile(zip_bytes) as zf:
-        for name in zf.namelist():
-            logger.debug("ZIP-tiedosto: %s", name)
-            try:
-                raw = zf.read(name)  # Luetaan kokonaan muistiin
-                if name.lower().endswith(".xlsx"):
-                    df = pd.read_excel(io.BytesIO(raw), engine="openpyxl")
-                elif name.lower().endswith(".xls"):
-                    df = pd.read_excel(io.BytesIO(raw), engine="xlrd")
-                elif name.lower().endswith(".csv"):
-                    df = pd.read_csv(io.BytesIO(raw), low_memory=False)
-                else:
-                    continue
-                parsed = _parse_raw_df(df)
-                if not parsed.empty:
-                    all_dfs.append(parsed)
-            except Exception as e:
-                logger.warning("Tiedoston %s parsinta epäonnistui: %s", name, e)
-
-    if not all_dfs:
-        logger.warning("Vuodelta %d ei löytynyt dataa", year)
-        return pd.DataFrame()
-
-    combined = pd.concat(all_dfs, ignore_index=True)
-    combined = combined.drop_duplicates(subset=["report_date", "currency"])
-    logger.info("Vuosi %d: %d riviä ladattu", year, len(combined))
-    return combined
+    df = _parse_zip(resp.content)
+    return _extract_currencies(df)
 
 
-async def fetch_history_all() -> pd.DataFrame:
-    """Hakee koko historian CFTC_FIRST_YEAR:sta nykyvuoteen."""
-    current_year = date.today().year
-    all_dfs = []
-    for year in range(CFTC_FIRST_YEAR, current_year + 1):
-        try:
-            df = await fetch_year(year)
-            if not df.empty:
-                all_dfs.append(df)
-        except Exception as e:
-            logger.error("Vuoden %d haku epäonnistui: %s", year, e)
+async def fetch_latest() -> pd.DataFrame:
+    """Fetch current year; also fetch previous year if data is thin."""
+    today = date.today()
+    df = await fetch_year(today.year)
 
-    if not all_dfs:
-        return pd.DataFrame()
+    if df.empty or df["report_date"].max() < date(today.year, 1, 15):
+        prev = await fetch_year(today.year - 1)
+        df = pd.concat([prev, df], ignore_index=True)
 
-    combined = pd.concat(all_dfs, ignore_index=True)
-    combined = combined.drop_duplicates(subset=["report_date", "currency"])
-    combined = combined.sort_values("report_date")
-    return combined
-
-
-def parse_uploaded_file(content: bytes, filename: str) -> pd.DataFrame:
-    """
-    Parsii käyttäjän lataaman CSV- tai Excel-tiedoston.
-    Tukee sekä CFTC:n standardimuotoa että yksinkertaistettua muotoa.
-    """
-    fname_lower = filename.lower()
-    try:
-        if fname_lower.endswith(".csv"):
-            df = pd.read_csv(io.BytesIO(content), low_memory=False)
-        elif fname_lower.endswith((".xlsx", ".xls")):
-            engine = "openpyxl" if fname_lower.endswith(".xlsx") else "xlrd"
-            df = pd.read_excel(io.BytesIO(content), engine=engine)
-        else:
-            raise ValueError(f"Tuntematon tiedostomuoto: {filename}")
-    except Exception as e:
-        raise ValueError(f"Tiedoston lukeminen epäonnistui: {e}") from e
-
-    return _parse_raw_df(df)
+    return df

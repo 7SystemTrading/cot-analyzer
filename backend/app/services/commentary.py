@@ -1,180 +1,156 @@
 """
-Suomenkielinen automaattinen tekstigeneraattori valuutoille ja valuuttapareille.
-Template-pohjainen – ei LLM:ää, deterministinen.
+COT Dashboard v2 – Rule-based explanation engine (English).
+Implements spec sections 10–11.
+Deterministic template logic — no LLM.
 """
 from typing import Optional
 
 
-# ---------------------------------------------------------------------------
-# Apusanat
-# ---------------------------------------------------------------------------
-
-def _score_adj(score: float) -> str:
-    """Pistemäärään perustuva adjektiivi."""
-    if score >= 1.5:
-        return "erittäin vahva"
-    elif score >= 0.75:
-        return "vahva"
-    elif score >= 0.25:
-        return "lievästi vahvistuva"
-    elif score >= -0.25:
-        return "neutraali"
-    elif score >= -0.75:
-        return "lievästi heikkeneva"
-    elif score >= -1.5:
-        return "heikko"
-    else:
-        return "erittäin heikko"
-
-
-def _momentum_desc(B: Optional[float], C: Optional[float]) -> str:
-    """Kuvaa lyhyen ja keskipitkän aikavälin momentumin."""
-    if B is None and C is None:
-        return "momentumia ei voida arvioida"
-
-    if B is None:
-        b_txt = "lyhyen aikavälin muutos ei saatavilla"
-    elif B > 0.5:
-        b_txt = "viikkomuutos on selvästi positiivinen"
-    elif B > 0:
-        b_txt = "viikkomuutos on lievästi positiivinen"
-    elif B < -0.5:
-        b_txt = "viikkomuutos on selvästi negatiivinen"
-    else:
-        b_txt = "viikkomuutos on lievästi negatiivinen"
-
-    if C is None:
-        return b_txt
-    elif C > 0.5:
-        c_txt = "neljän viikon trendi on nouseva"
-    elif C > 0:
-        c_txt = "neljän viikon trendi on lievästi nouseva"
-    elif C < -0.5:
-        c_txt = "neljän viikon trendi on laskeva"
-    else:
-        c_txt = "neljän viikon trendi on lievästi laskeva"
-
-    return f"{b_txt}, ja {c_txt}"
-
-
-def _positioning_direction(A: Optional[float]) -> str:
-    """Kuvaa positioning-tason suhteessa historialliseen normiin."""
-    if A is None:
-        return "historiallista vertailua ei saatavilla"
-    elif A > 1.0:
-        return "selvästi normaalia korkeampi"
-    elif A > 0.3:
-        return "lievästi normaalia korkeampi"
-    elif A < -1.0:
-        return "selvästi normaalia matalampi"
-    elif A < -0.3:
-        return "lievästi normaalia matalampi"
-    else:
-        return "lähellä historiallista normaalia"
-
-
-def _exhaustion_warning(score: float, percentile: Optional[float]) -> str:
-    """Varoitus jos positioning on äärimmäinen."""
-    if percentile is None:
-        return ""
-    if percentile >= 90 and score > 0:
-        return (
-            " Huomio: positioning on lähellä historiallista ääriarvoa, "
-            "mikä voi ennakoida kasvavaa reversal-riskiä."
-        )
-    if percentile <= 10 and score < 0:
-        return (
-            " Huomio: negatiivinen positioning on historiallisesti äärimmäinen, "
-            "mikä voi ennakoida kasvavaa reversal-riskiä."
-        )
-    return ""
-
-
-def _percentile_desc(percentile: Optional[float]) -> str:
-    if percentile is None:
-        return "historiallinen vertailu ei saatavilla"
-    elif percentile >= 90:
-        return f"{percentile:.0f}. persentiilillä (poikkeuksellisen korkea)"
-    elif percentile >= 75:
-        return f"{percentile:.0f}. persentiilillä (selvästi korkea)"
-    elif percentile >= 25:
-        return f"{percentile:.0f}. persentiilillä (normaali vaihteluväli)"
-    elif percentile >= 10:
-        return f"{percentile:.0f}. persentiilillä (selvästi matala)"
-    else:
-        return f"{percentile:.0f}. persentiilillä (poikkeuksellisen matala)"
-
-
-# ---------------------------------------------------------------------------
-# Valuuttakuvaus
-# ---------------------------------------------------------------------------
-
-def generate_currency_commentary(
-    currency: str,
-    score: float,
-    A: Optional[float],
-    B: Optional[float],
-    C: Optional[float],
-    percentile: Optional[float],
+def currency_explanation(
+    symbol: str,
     bias_label: str,
+    dir_score: Optional[float],
+    mom_score: Optional[float],
+    percentile: Optional[float],
+    reversal_risk: Optional[str],
+    commercial_opposition: Optional[int],
+    extreme_score: Optional[int],
 ) -> str:
-    adj = _score_adj(score)
-    pos_dir = _positioning_direction(A)
-    momentum = _momentum_desc(B, C)
-    pct_desc = _percentile_desc(percentile)
-    warning = _exhaustion_warning(score, percentile)
+    """
+    Generate a plain-English explanation for a single currency's COT position.
+    Spec section 10 + example 11.1.
+    """
+    if bias_label is None:
+        return f"{symbol}: Insufficient data to determine bias."
 
-    return (
-        f"{currency} on tällä viikolla {adj} (score: {score:+.2f}, {pct_desc}). "
-        f"Nykyinen nettopositio on {pos_dir} suhteessa historialliseen normiin. "
-        f"{momentum.capitalize()}.{warning}"
-    ).strip()
+    parts = []
 
+    # Opening bias statement
+    parts.append(f"{symbol} is {bias_label.lower()}.")
 
-# ---------------------------------------------------------------------------
-# Parikuvaus
-# ---------------------------------------------------------------------------
+    # Direction and momentum (spec 10.1, 10.4)
+    if dir_score is not None and mom_score is not None:
+        if dir_score > 0 and mom_score > 0:
+            parts.append(
+                "Speculative positioning is net long and increased this week, "
+                "indicating strengthening bullish sentiment."
+            )
+        elif dir_score > 0 and mom_score < 0:
+            parts.append(
+                "Speculative positioning is net long but decreased this week, "
+                "suggesting weakening bullish momentum."
+            )
+        elif dir_score < 0 and mom_score < 0:
+            parts.append(
+                "Speculative positioning is net short and decreased further this week, "
+                "indicating strengthening bearish sentiment."
+            )
+        elif dir_score < 0 and mom_score > 0:
+            parts.append(
+                "Speculative positioning is net short but recovered this week, "
+                "suggesting weakening bearish momentum."
+            )
+        elif mom_score == 0:
+            direction = "long" if dir_score > 0 else "short"
+            parts.append(
+                f"Speculative positioning is net {direction} with no change this week."
+            )
 
-def _pair_context(pair_score: float, percentile: Optional[float]) -> str:
-    """Lisäkonteksti parin tilanteesta."""
-    if percentile is not None and percentile >= 90:
-        return (
-            "Parin suhteellinen positioning on lähellä historiallista ääriarvoa, "
-            "mikä tukee rakennetta mutta lisää myös reversal-riskiä."
+    # Extreme context (spec 10.2)
+    if extreme_score is not None and extreme_score > 0:
+        pct_str = f"{round(percentile * 100)}th" if percentile is not None else "high"
+        if extreme_score == 3:
+            parts.append(
+                f"Positioning is at a historical extreme ({pct_str} percentile), "
+                "indicating potential exhaustion and elevated reversal risk."
+            )
+        elif extreme_score == 2:
+            parts.append(
+                f"Positioning is at a major extreme ({pct_str} percentile), "
+                "raising the possibility of a sentiment reversal."
+            )
+        elif extreme_score == 1:
+            parts.append(
+                f"Positioning shows mild crowding ({pct_str} percentile)."
+            )
+
+    # Commercial opposition (spec 10.3)
+    if commercial_opposition == 1:
+        parts.append(
+            "Commercials (hedgers) are positioned opposite to speculators, "
+            "which may indicate overextension in the speculative position."
         )
-    if percentile is not None and percentile <= 10:
-        return (
-            "Parin suhteellinen positioning on historiallisesti äärimmäisen heikko, "
-            "mikä voi ennakoida korjausliikettä."
-        )
-    if abs(pair_score) < 0.5:
-        return "Parin välillä ei ole tällä hetkellä merkittävää suhteellista etua."
-    return ""
+
+    # Reversal risk summary
+    if reversal_risk == "High":
+        parts.append("Overall reversal risk is high.")
+    elif reversal_risk == "Medium":
+        parts.append("Overall reversal risk is moderate.")
+
+    return " ".join(parts)
 
 
-def generate_pair_commentary(
+def pair_explanation(
     pair: str,
+    pair_label: str,
     base: str,
     quote: str,
-    pair_score: float,
-    base_score: float,
-    quote_score: float,
-    percentile: Optional[float],
-    bias_label: str,
+    base_bias: str,
+    quote_bias: str,
+    conviction: str,
+    base_reversal: Optional[str],
+    quote_reversal: Optional[str],
+    divergence_type: Optional[str],
+    divergence_strength: Optional[float],
 ) -> str:
-    base_adj = _score_adj(base_score)
-    quote_adj = _score_adj(quote_score)
-    pct_desc = _percentile_desc(percentile)
-    context = _pair_context(pair_score, percentile)
+    """
+    Generate a plain-English explanation for a currency pair.
+    Spec section 10.5 + example 11.2.
+    """
+    if pair_label is None:
+        return f"{pair}: Insufficient data."
 
-    direction = "bullish" if pair_score > 0 else "bearish" if pair_score < 0 else "neutraali"
+    parts = []
 
-    text = (
-        f"{pair} muodostaa tällä viikolla {bias_label.lower()}-biasin "
-        f"(pair score: {pair_score:+.2f}, {pct_desc}). "
-        f"{base} on {base_adj}, kun taas {quote} on {quote_adj}."
-    )
-    if context:
-        text += f" {context}"
+    # Opening pair bias (spec 11.2)
+    direction = "bullish" if "Bullish" in pair_label else "bearish" if "Bearish" in pair_label else "neutral"
+    parts.append(f"{pair} is {direction}.")
 
-    return text.strip()
+    # Relative strength explanation (spec 10.5)
+    if direction != "neutral":
+        stronger, weaker = (base, quote) if "Bullish" in pair_label else (quote, base)
+        parts.append(
+            f"This reflects stronger COT positioning in {stronger} relative to {weaker} "
+            f"({base} is {base_bias.lower()}, {quote} is {quote_bias.lower()})."
+        )
+
+    # Conviction
+    parts.append(f"Signal conviction is {conviction.lower()}.")
+
+    # Reversal risk penalty context
+    high_rr = []
+    if base_reversal == "High":
+        high_rr.append(base)
+    if quote_reversal == "High":
+        high_rr.append(quote)
+    if high_rr:
+        parts.append(
+            f"Note: {' and '.join(high_rr)} shows elevated reversal risk, "
+            "which reduces conviction."
+        )
+
+    # Divergence (spec 10 → divergence context)
+    if divergence_type == "Bullish":
+        strength_desc = "strong" if divergence_strength and divergence_strength > 0.5 else "moderate"
+        parts.append(
+            f"A {strength_desc} bullish divergence is detected: price is trending lower "
+            "while COT positioning is improving — a potential bullish reversal signal."
+        )
+    elif divergence_type == "Bearish":
+        strength_desc = "strong" if divergence_strength and divergence_strength > 0.5 else "moderate"
+        parts.append(
+            f"A {strength_desc} bearish divergence is detected: price is trending higher "
+            "while COT positioning is deteriorating — a potential bearish reversal signal."
+        )
+
+    return " ".join(parts)

@@ -1,288 +1,166 @@
-from datetime import date, datetime
-from typing import Optional, List
+"""
+COT Dashboard v2 – Pydantic response schemas.
+"""
+from datetime import date
+from typing import List, Optional
 from pydantic import BaseModel
 
 
 # ---------------------------------------------------------------------------
-# Raw Report
+# Currency schemas
 # ---------------------------------------------------------------------------
-class RawReportBase(BaseModel):
-    report_date: date
+
+class CurrencyBiasItem(BaseModel):
     currency: str
-    open_interest_total: float
-    lev_long: float
-    lev_short: float
-    lev_spreading: float = 0.0
-    contract_name: Optional[str] = None
-    source_file: Optional[str] = None
+    bias_label: Optional[str]
+    currency_score: Optional[float]
+    dir_score: Optional[float]
+    mom_score: Optional[float]
+    strength_score: Optional[float]
+    percentile: Optional[float]
+    extreme_score: Optional[int]
+    reversal_risk: Optional[str]
+    reversal_score: Optional[int]
+    commercial_opposition: Optional[int]
+    nc_net: Optional[float]
+    net_change: Optional[float]
+    net_pct_oi: Optional[float]
+    explanation: Optional[str] = None
 
 
-class RawReportOut(RawReportBase):
-    id: int
-    created_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
-
-
-# ---------------------------------------------------------------------------
-# Currency Metrics
-# ---------------------------------------------------------------------------
-class CurrencyMetricsOut(BaseModel):
+class CurrencyHistoryPoint(BaseModel):
     report_date: date
+    nc_net: Optional[float]
+    comm_net: Optional[float]
+    net_change: Optional[float]
+    net_pct_oi: Optional[float]
+    percentile: Optional[float]
+    currency_score: Optional[float]
+    bias_label: Optional[str]
+    extreme_score: Optional[int]
+    reversal_risk: Optional[str]
+
+
+class CurrencyDetailResponse(BaseModel):
     currency: str
-    net_position: Optional[float] = None
-    net_percent_lf: Optional[float] = None
-    oi_lf: Optional[float] = None
-    oi_lf_ratio: Optional[float] = None
-    delta_1w: Optional[float] = None
-    delta_4w: Optional[float] = None
-    oi_lf_ratio_delta_4w: Optional[float] = None
-    z_current: Optional[float] = None
-    z_delta_1w: Optional[float] = None
-    z_delta_4w: Optional[float] = None
-    z_oi_delta: Optional[float] = None
-    currency_score: Optional[float] = None
-    percentile_52w: Optional[float] = None
-    bias_label: Optional[str] = None
-    commentary: Optional[str] = None
-    history_flag: Optional[str] = None
+    report_date: Optional[date]
+    current: Optional[CurrencyBiasItem]
+    history: List[CurrencyHistoryPoint] = []
+    available_dates: List[date] = []
 
-    class Config:
-        from_attributes = True
+
+class CurrenciesResponse(BaseModel):
+    report_date: Optional[date]
+    publish_date: Optional[date]
+    currencies: List[CurrencyBiasItem] = []
 
 
 # ---------------------------------------------------------------------------
-# Pair Metrics
+# Pair schemas
 # ---------------------------------------------------------------------------
-class PairMetricsOut(BaseModel):
-    report_date: date
+
+class PairBiasItem(BaseModel):
     pair: str
     base_currency: str
     quote_currency: str
-    base_score: Optional[float] = None
-    quote_score: Optional[float] = None
-    pair_score: Optional[float] = None
-    pair_percentile_52w: Optional[float] = None
-    bias_label: Optional[str] = None
-    commentary: Optional[str] = None
-
-    class Config:
-        from_attributes = True
-
-
-# ---------------------------------------------------------------------------
-# Import Log
-# ---------------------------------------------------------------------------
-class ImportLogOut(BaseModel):
-    id: int
-    imported_at: Optional[datetime] = None
-    source_type: str
-    source_file: Optional[str] = None
-    rows_total: int
-    rows_inserted: int
-    rows_skipped: int
-    errors: Optional[str] = None
-    status: str
-
-    class Config:
-        from_attributes = True
+    pair_score: Optional[float]
+    pair_label: Optional[str]
+    base_score: Optional[float]
+    quote_score: Optional[float]
+    conviction: Optional[str]
+    conviction_score: Optional[float]
+    base_reversal_risk: Optional[str]
+    quote_reversal_risk: Optional[str]
+    divergence_type: Optional[str]
+    divergence_strength: Optional[float]
+    explanation: Optional[str] = None
 
 
-# ---------------------------------------------------------------------------
-# Dashboard
-# ---------------------------------------------------------------------------
-class DataStatus(BaseModel):
-    latest_report_date: Optional[date] = None
-    latest_publish_date: Optional[date] = None
-    total_weeks: int = 0
-    status: str = "no_data"   # "ok" | "delayed" | "no_data"
-    message: Optional[str] = None
-
-
-class DashboardResponse(BaseModel):
-    data_status: DataStatus
-    top_currencies: List[CurrencyMetricsOut] = []
-    bottom_currencies: List[CurrencyMetricsOut] = []
-    top_pairs: List[PairMetricsOut] = []
-    bottom_pairs: List[PairMetricsOut] = []
-
-
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
-class ScoreWeightsIn(BaseModel):
-    w_a: float = 0.45
-    w_b: float = 0.25
-    w_c: float = 0.20
-    w_d: float = 0.10
-
-
-class BiasThresholdsIn(BaseModel):
-    currency_strong_bull: float = 1.25
-    currency_mild_bull: float = 0.50
-    currency_mild_bear: float = -0.50
-    currency_strong_bear: float = -1.25
-    pair_exceptional_bull: float = 2.0
-    pair_strong_bull: float = 1.25
-    pair_mild_bull: float = 0.50
-    pair_mild_bear: float = -0.50
-    pair_strong_bear: float = -1.25
-    pair_exceptional_bear: float = -2.0
-
-
-class ConfigOut(BaseModel):
-    weights: ScoreWeightsIn
-    thresholds: BiasThresholdsIn
-
-
-# ---------------------------------------------------------------------------
-# Import response
-# ---------------------------------------------------------------------------
-class ImportResult(BaseModel):
-    status: str
-    rows_total: int
-    rows_inserted: int
-    rows_skipped: int
-    errors: List[str] = []
-    message: str
-
-
-# ---------------------------------------------------------------------------
-# Bias Dashboard (erillinen laskentamalli)
-# ---------------------------------------------------------------------------
-class BiasCurrencyRow(BaseModel):
-    currency: str
-    net_pct_lf: Optional[float] = None
-    delta_1: Optional[float] = None
-    delta_2: Optional[float] = None
-    delta_3: Optional[float] = None
-    delta_4: Optional[float] = None
-
-
-class BiasPairRow(BaseModel):
-    pair: str
-    base: str
-    quote: str
-    strength_index: float
-    bias: str
-    confirmed: bool = False
-    net_pct_lf_base: float
-    net_pct_lf_quote: float
-    delta_1_base: Optional[float] = None
-    delta_1_quote: Optional[float] = None
-    delta_2_base: Optional[float] = None
-    delta_2_quote: Optional[float] = None
-    delta_3_base: Optional[float] = None
-    delta_3_quote: Optional[float] = None
-    delta_4_base: Optional[float] = None
-    delta_4_quote: Optional[float] = None
-
-
-class BiasDashboardResponse(BaseModel):
-    report_date: Optional[date] = None
-    publish_date: Optional[date] = None
-    threshold: float
-    currencies: List[BiasCurrencyRow] = []
-    strong_long: List[BiasPairRow] = []
-    strong_short: List[BiasPairRow] = []
-    neutral_count: int = 0
-
-
-# ---------------------------------------------------------------------------
-# Verifiointi (hintadata vs. bias)
-# ---------------------------------------------------------------------------
-class CandleOut(BaseModel):
-    date: str
-    open: float
-    high: float
-    low: float
-    close: float
-
-
-class VerificationPairRow(BaseModel):
-    pair: str
-    bias_label: str
-    pair_score: float
-    candles: List[CandleOut] = []
-    daily_changes_pct: List[Optional[float]] = []
-    daily_bias_correct: List[Optional[bool]] = []
-    week_open: Optional[float] = None
-    week_close: Optional[float] = None
-    week_change_pct: Optional[float] = None
-    direction: Optional[str] = None      # "up" | "down" | None
-    week_bias_correct: Optional[bool] = None
-    daily_hit_rate: Optional[float] = None
-
-
-class VerificationResponse(BaseModel):
-    report_date: Optional[date] = None
-    publish_date: Optional[date] = None
-    verification_start: Optional[date] = None
-    verification_end: Optional[date] = None
-    pairs: List[VerificationPairRow] = []
-    hit_rate_week: Optional[float] = None
-    hit_rate_daily: Optional[float] = None
-    hit_rate_strong: Optional[float] = None
-    hit_rate_mild: Optional[float] = None
-    total_evaluated: int = 0
-    total_neutral: int = 0
-
-
-class VerificationWeekSummary(BaseModel):
+class PairHistoryPoint(BaseModel):
     report_date: date
-    hit_rate: Optional[float] = None
-    pairs_evaluated: int = 0
+    pair_score: Optional[float]
+    pair_label: Optional[str]
+    conviction: Optional[str]
+    divergence_type: Optional[str]
+    base_nc_net: Optional[float]
+    quote_nc_net: Optional[float]
 
 
-class VerificationStatsResponse(BaseModel):
-    weeks_analyzed: int = 0
-    week_hit_rate: Optional[float] = None
-    daily_hit_rate: Optional[float] = None
-    strong_bias_hit_rate: Optional[float] = None
-    mild_bias_hit_rate: Optional[float] = None
-    by_week: List[VerificationWeekSummary] = []
+class PairsResponse(BaseModel):
+    report_date: Optional[date]
+    publish_date: Optional[date]
+    pairs: List[PairBiasItem] = []
+    available_dates: List[date] = []
 
 
-# ---------------------------------------------------------------------------
-# Komponenttianalyysi
-# ---------------------------------------------------------------------------
-class ComponentHitRates(BaseModel):
-    component: str                          # "A", "B", "C", "D", "B+C", "Composite"
-    label: str                              # Ihmisluettava nimi
-    trend_hit_rate: Optional[float] = None  # Osuma trendinmukaisena
-    contrarian_hit_rate: Optional[float] = None  # Osuma kontraarina
-    extreme_trend_hr: Optional[float] = None     # |z|>1.5, trendinmukainen
-    extreme_contrarian_hr: Optional[float] = None  # |z|>1.5, kontraarinen
-    sample_count: int = 0                   # Kaikki havainnot (ei-neutraalit)
-    extreme_count: int = 0                  # Ääripäähavainnot (|z|>1.5)
-
-
-class ComponentAnalysisResponse(BaseModel):
-    horizon_weeks: int = 1
-    analysis_weeks: int = 52
-    components: List[ComponentHitRates] = []
-    best_trend: Optional[str] = None        # Paras trendinmukainen komponentti
-    best_contrarian: Optional[str] = None   # Paras kontraarinen komponentti
-
-
-# ---------------------------------------------------------------------------
-# Exhaustion Contrarian -signaali
-# ---------------------------------------------------------------------------
-class ExhaustionSignalPair(BaseModel):
+class PairDetailResponse(BaseModel):
     pair: str
-    pair_A: float                           # Parin A-komponentti (base_z - quote_z)
-    pair_A_prev: Optional[float] = None     # Edellisen viikon pair_A
-    a_growing: bool = False                 # |A| kasvaa → exhaustion rakentuu
-    signal: str                             # "CONTRARIAN_SHORT" | "CONTRARIAN_LONG" | "NEUTRAL"
-    signal_strength: str                    # "strong" | "moderate" | "none"
-    note: str = ""
+    report_date: Optional[date]
+    current: Optional[PairBiasItem]
+    base_detail: Optional[CurrencyBiasItem]
+    quote_detail: Optional[CurrencyBiasItem]
+    history: List[PairHistoryPoint] = []
+    available_dates: List[date] = []
 
 
-class ExhaustionDashboardResponse(BaseModel):
-    report_date: Optional[date] = None
-    publish_date: Optional[date] = None
-    threshold: float = 1.5                  # Yksittäisen valuutan |z| raja
-    contrarian_short: List[ExhaustionSignalPair] = []   # A äärimmäisen positiivinen → ennusta laskua
-    contrarian_long: List[ExhaustionSignalPair] = []    # A äärimmäisen negatiivinen → ennusta nousua
-    neutral_count: int = 0
+# ---------------------------------------------------------------------------
+# Overview schema
+# ---------------------------------------------------------------------------
+
+class ExtremeItem(BaseModel):
+    currency: str
+    bias_label: Optional[str]
+    extreme_score: Optional[int]
+    percentile: Optional[float]
+    reversal_risk: Optional[str]
+
+
+class EventItem(BaseModel):
+    event_type: str        # "bias_shift" | "new_extreme" | "new_divergence"
+    subject: str           # currency or pair name
+    detail: str            # human-readable description
+
+
+class OverviewResponse(BaseModel):
+    report_date: Optional[date]
+    publish_date: Optional[date]
+    currencies_ranked: List[CurrencyBiasItem] = []
+    top_pairs: List[PairBiasItem] = []
+    extremes: List[ExtremeItem] = []
+    events: List[EventItem] = []
+    available_dates: List[date] = []
+
+
+# ---------------------------------------------------------------------------
+# Data management schemas
+# ---------------------------------------------------------------------------
+
+class AppSettingsSchema(BaseModel):
+    percentile_window: int = 156
+    divergence_window: int = 4
+    weight_direction: float = 0.4
+    weight_momentum: float = 0.2
+    weight_strength: float = 0.4
+    extreme_threshold_mild: float = 0.70
+    extreme_threshold_major: float = 0.85
+    extreme_threshold_historic: float = 0.95
+
+
+class ImportLogItem(BaseModel):
+    id: int
+    imported_at: str
+    source_type: str
+    source_file: Optional[str]
+    rows_total: int
+    rows_inserted: int
+    rows_skipped: int
+    status: str
+    errors: Optional[str]
+
+
+class DataStatusResponse(BaseModel):
+    latest_report_date: Optional[date]
+    total_weeks: int
+    total_rows: int
+    currencies_covered: List[str]
+    recent_logs: List[ImportLogItem] = []

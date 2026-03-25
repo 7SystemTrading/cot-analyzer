@@ -24,6 +24,6 @@ def get_db():
 
 
 def init_db():
-    """Luo taulut jos ne eivät vielä ole olemassa."""
-    from app import models  # noqa: F401 – rekisteröi mallit
+    """Create all tables if they do not exist."""
+    from app import models  # noqa: F401 – registers models
     Base.metadata.create_all(bind=engine)

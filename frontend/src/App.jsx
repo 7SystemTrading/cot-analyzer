@@ -1,29 +1,19 @@
-import { BrowserRouter, Routes, Route, NavLink, useLocation } from 'react-router-dom'
-import Dashboard from './pages/Dashboard'
-import Valuutat from './pages/Valuutat'
-import Valuuttaparit from './pages/Valuuttaparit'
-import Historia from './pages/Historia'
-import TuoData from './pages/TuoData'
-import Metodologia from './pages/Metodologia'
-import BiasDashboard from './pages/BiasDashboard'
-import Exhaustion from './pages/Exhaustion'
-import Verifiointi from './pages/Verifiointi'
+import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
+import Overview     from './pages/Overview'
+import Currency     from './pages/Currency'
+import Pairs        from './pages/Pairs'
+import PairDetail   from './pages/PairDetail'
+import DataManagement from './pages/DataManagement'
 
 const NAV = [
-  { to: '/', label: 'Dashboard' },
-  { to: '/exhaustion', label: 'Exhaustion' },
-  { to: '/bias', label: 'COT Bias' },
-  { to: '/verifiointi', label: 'Verifiointi' },
-  { to: '/valuutat', label: 'Valuutat' },
-  { to: '/parit', label: 'Valuuttaparit' },
-  { to: '/historia', label: 'Historia' },
-  { to: '/tuo-dataa', label: 'Tuo dataa' },
-  { to: '/metodologia', label: 'Metodologia' },
+  { to: '/',        label: 'Overview', end: true },
+  { to: '/pairs',   label: 'Pairs' },
+  { to: '/data',    label: 'Data' },
 ]
 
 function Layout({ children }) {
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: '#060d1a' }}>
       <header style={{
         background: '#0a0e1a',
         borderBottom: '1px solid #1e293b',
@@ -34,14 +24,14 @@ function Layout({ children }) {
       }}>
         <div style={{ maxWidth: '1400px', margin: '0 auto', display: 'flex', alignItems: 'center', gap: '32px', height: '56px' }}>
           <span style={{ fontWeight: 800, fontSize: '1rem', color: '#e2e8f0', whiteSpace: 'nowrap' }}>
-            📈 COT Analyzer
+            COT Dashboard
           </span>
-          <nav style={{ display: 'flex', gap: '4px', overflowX: 'auto' }}>
+          <nav style={{ display: 'flex', gap: '4px' }}>
             {NAV.map(n => (
               <NavLink
                 key={n.to}
                 to={n.to}
-                end={n.to === '/'}
+                end={n.end}
                 style={({ isActive }) => ({
                   padding: '6px 14px',
                   borderRadius: '6px',
@@ -65,8 +55,9 @@ function Layout({ children }) {
         {children}
       </main>
 
-      <footer style={{ borderTop: '1px solid #1e293b', padding: '12px 24px', textAlign: 'center', color: '#334155', fontSize: '0.75rem' }}>
-        COT Currency Strength Bias Analyzer – Perustuu CFTC:n julkiseen dataan. Ei kaupankäyntineuvoja.
+      <footer style={{ borderTop: '1px solid #1e293b', padding: '12px 24px', textAlign: 'center',
+        color: '#334155', fontSize: '0.75rem' }}>
+        COT Dashboard — Based on CFTC public data. Not financial advice.
       </footer>
     </div>
   )
@@ -77,15 +68,11 @@ export default function App() {
     <BrowserRouter>
       <Layout>
         <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/exhaustion" element={<Exhaustion />} />
-          <Route path="/bias" element={<BiasDashboard />} />
-          <Route path="/verifiointi" element={<Verifiointi />} />
-          <Route path="/valuutat" element={<Valuutat />} />
-          <Route path="/parit" element={<Valuuttaparit />} />
-          <Route path="/historia" element={<Historia />} />
-          <Route path="/tuo-dataa" element={<TuoData />} />
-          <Route path="/metodologia" element={<Metodologia />} />
+          <Route path="/"              element={<Overview />} />
+          <Route path="/currency/:symbol" element={<Currency />} />
+          <Route path="/pairs"         element={<Pairs />} />
+          <Route path="/pair/:pair"    element={<PairDetail />} />
+          <Route path="/data"          element={<DataManagement />} />
         </Routes>
       </Layout>
     </BrowserRouter>

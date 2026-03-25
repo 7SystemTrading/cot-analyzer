@@ -1,85 +1,47 @@
 import axios from 'axios'
 
 const BASE = '/api/v1'
-
 export const api = axios.create({ baseURL: BASE })
 
-// Dashboard
-export const getDashboard = (reportDate = null) =>
-  api.get('/dashboard', { params: reportDate ? { report_date: reportDate } : {} })
+// Overview
+export const getOverview = (reportDate = null) =>
+  api.get('/overview', { params: reportDate ? { report_date: reportDate } : {} })
 
-// Valuutat
-export const getCurrencyRanking = (reportDate = null) =>
-  api.get('/currencies/ranking', { params: reportDate ? { report_date: reportDate } : {} })
+// Currencies
+export const getCurrencies = (reportDate = null) =>
+  api.get('/currencies', { params: reportDate ? { report_date: reportDate } : {} })
 
-export const getCurrencyHistory = (currency, weeks = 52) =>
-  api.get(`/currencies/${currency}/history`, { params: { weeks } })
-
-export const getAvailableDates = () => api.get('/currencies/dates')
-
-// Parit
-export const getPairRanking = (reportDate = null, minAbsScore = 0) =>
-  api.get('/pairs/ranking', {
+export const getCurrencyDetail = (symbol, reportDate = null, historyWeeks = 52) =>
+  api.get(`/currencies/${symbol}`, {
     params: {
       ...(reportDate ? { report_date: reportDate } : {}),
-      min_abs_score: minAbsScore,
+      history_weeks: historyWeeks,
     },
   })
 
-export const getPairHistory = (pair, weeks = 52) =>
-  api.get(`/pairs/${pair}/history`, { params: { weeks } })
-
-export const getHeatmapData = (reportDate = null) =>
-  api.get('/pairs/heatmap', { params: reportDate ? { report_date: reportDate } : {} })
-
-// Import
-export const uploadFile = (formData) =>
-  api.post('/import/upload', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  })
-
-export const fetchHistory = (year = null) =>
-  api.post('/import/fetch-history', null, { params: year ? { year } : {} })
-
-export const fetchLatest = () => api.post('/import/fetch-latest')
-
-export const getImportLogs = (limit = 50) =>
-  api.get('/import/logs', { params: { limit } })
-
-// Bias Dashboard
-export const getBiasDashboard = (reportDate = null, threshold = 25) =>
-  api.get('/bias-dashboard', {
+// Pairs
+export const getPairs = (reportDate = null, filters = {}) =>
+  api.get('/pairs', {
     params: {
       ...(reportDate ? { report_date: reportDate } : {}),
-      threshold,
+      ...filters,
     },
   })
 
-// Verifiointi
-export const getVerification = (reportDate = null, horizon = 1) =>
-  api.get('/verification', {
+export const getPairDetail = (pair, reportDate = null, historyWeeks = 52) =>
+  api.get(`/pairs/${pair}`, {
     params: {
       ...(reportDate ? { report_date: reportDate } : {}),
-      horizon,
+      history_weeks: historyWeeks,
     },
   })
 
-export const getVerificationStats = (weeks = 26, horizon = 1) =>
-  api.get('/verification/stats', { params: { weeks, horizon } })
+// Data management
+export const fetchData = (year = null) =>
+  api.post('/data/fetch', null, { params: year ? { year } : {} })
 
-export const getComponentAnalysis = (weeks = 52, horizon = 1) =>
-  api.get('/verification/component-analysis', { params: { weeks, horizon } })
+export const getDataStatus = () => api.get('/data/status')
 
-// Exhaustion Contrarian
-export const getExhaustionSignals = (reportDate = null, threshold = 1.5) =>
-  api.get('/exhaustion', {
-    params: {
-      ...(reportDate ? { report_date: reportDate } : {}),
-      threshold,
-    },
-  })
-
-// Config
-export const getConfig = () => api.get('/config')
-export const updateWeights = (weights) => api.put('/config/weights', weights)
-export const updateThresholds = (thresholds) => api.put('/config/thresholds', thresholds)
+// Settings (§16)
+export const getConfig   = () => api.get('/config')
+export const updateConfig = (body) => api.put('/config', body)
